@@ -1,0 +1,152 @@
+# LibreTap session format (version 1, draft)
+
+A **session** is one recording by one recorder: LibreTap on the sniffer laptop, or Tick on the instrument's
+own PC. It is a plain folder, readable without LibreTap: JSON lines, PNG/JPEG images, optional pcap.
+A **project** (LibreTap) combines sessions recorded at the same time and stores the clock offsets between them.
+
+Everything is UTF-8. Bytes on a link are lowercase hex strings. Unknown keys must be ignored by readers, so
+recorders may add fields without a version change.
+
+## Folder
+
+```
+<name>/                     e.g. 20261130-101500-cora   (any name; the folder is the session)
+  session.json              who recorded, when, which sources
+  events.jsonl              everything that happened, one JSON object per line, in recording order
+  frames/                   screen pictures (Tick: screenshots; LibreTap: camera stills), referenced by events
+  files/                    copies of files (e.g. the vendor program's settings before the session)
+  raw/                      optional raw captures (pcap from dumpcap, raw bytes per serial line, sniffer dumps)
+```
+
+A recorder writes `events.jsonl` as it goes (append, flush often), so a session that ends in a crash or a
+pulled USB stick is still readable up to the last complete line. A reader ignores a final incomplete line (and
+skips, but counts, any other line that is not JSON).
+
+Lines are in recording order, which is *nearly* time order: a serial-tap chunk is written when it is complete, with
+the time its first bytes arrived, so it can follow a line with a later `t`. Readers sort events by `t` (stable).
+LibreTap writes `t` and `kind` first on each line so the file reads well; readers must not rely on key order.
+
+## session.json
+
+```json
+{
+  "format": "libretap-session",
+  "version": 1,
+  "recorder": "Tick 0.1.0",              // or "LibreTap 0.1.0"
+  "host": "WIN2000-LAB",                 // computer name, may be ""
+  "os": "Windows 5.0 build 2195",
+  "started": "2026-11-30T10:15:00.123+01:00",
+  "clock": "Recorder's own wall clock; event t = seconds since 1970-01-01 UTC by that clock",
+  "sources": [
+    {"id": "screen", "kind": "screen", "label": "Screen 1024x768", "width": 1024, "height": 768},
+    {"id": "com1", "kind": "api-serial", "label": "COM1 (VENDOR.EXE)", "process": "VENDOR.EXE"}
+  ],
+  "note": "",
+  "t_started": 1796031300.123,           // optional: "started" as epoch seconds (LibreTap writes it)
+  "ended": "2026-11-30T11:02:10.456+01:00", "t_ended": 1796034130.456,   // optional, written at the end
+  "stats": {"bytes_a": 1234, "bytes_b": 5678, "chunks": 210, "stills": 340, "marks": 7, "syncs": 1},  // optional
+  "demo": true                           // optional: recorded from LibreTap's demo instrument, not real hardware
+}
+```
+
+Source entries carry what a reader needs to label and time their events:
+
+```jsonc
+{"id": "tap", "kind": "serial-tap", "label": "Serial tap 9600 baud 8N1",
+ "names": {"a": "PC", "b": "Instrument"}, "ports": {"a": "/dev/ttyUSB0", "b": "/dev/ttyUSB1"},
+ "baud": 9600, "format": "8N1", "gap_ms": 20, "raw": {"a": "raw/a.bin", "b": "raw/b.bin"}}
+{"id": "camera", "kind": "camera", "label": "HD USB Camera (/dev/video2) 1920x1080", "camera": "/dev/video2",
+ "width": 1920, "height": 1080, "every_s": 0.5}
+```
+
+Source kinds:
+
+| kind | recorder | data |
+|---|---|---|
+| `serial-tap` | LibreTap | two listen-only lines; `dir` is `a` (PC's TX) or `b` (instrument's TX); `names` gives labels |
+| `usb-pico` | LibreTap | Pico usb-sniffer-lite; events carry decoded packets/transfers |
+| `ethernet` | LibreTap | pcap in `raw/`, events carry per-packet summaries |
+| `camera` | LibreTap | stills of the instrument PC's screen |
+| `screen` | Tick | screenshots (full frames and changed regions) |
+| `api-serial` | Tick | calls the vendor program makes on a COM port |
+| `api-net` | Tick | socket calls (send/recv/connect) |
+| `api-usb` | Tick | DeviceIoControl/ReadFile/WriteFile on non-COM device handles |
+| `api-file` | Tick | files the vendor program opens, reads and writes (names, sizes; contents optional) |
+| `input` | Tick | mouse clicks, key presses (key names only, never typed text), active window title |
+
+## events.jsonl
+
+Every event has `t` (float seconds, Unix epoch, recorder's clock, at least millisecond precision) and `kind`.
+Most have `src` (a source id). Kinds:
+
+```jsonc
+{"t":1796031300.123,"kind":"data","src":"tap","dir":"a","hex":"2a49444e3f0d","end":1796031300.129}
+                                    // bytes seen on a line; t = first bytes arrived, end (optional) = last bytes
+{"t":…,"kind":"data","src":"com1","dir":"out","hex":"…","call":"WriteFile","n":6}    // Tick: program wrote
+{"t":…,"kind":"data","src":"com1","dir":"in","hex":"…","call":"ReadFile","n":11}     // Tick: program read
+{"t":…,"kind":"config","src":"com1","baud":9600,"bits":8,"parity":"N","stop":1,
+      "rts":"handshake","dtr":"on","timeouts":{"read_interval":50}}                   // port settings changed
+{"t":…,"kind":"open","src":"com1","path":"\\\\.\\COM1","ok":true}                       // handle opened/closed
+{"t":…,"kind":"close","src":"com1"}
+{"t":…,"kind":"call","src":"usb0","call":"DeviceIoControl","code":"0x00220004","in":"…","out":"…"}
+{"t":…,"kind":"frame","src":"screen","file":"frames/000123.png","full":false,"x":10,"y":20,"w":300,"h":40}
+{"t":…,"kind":"frame","src":"camera","file":"frames/cam_000045.jpg","full":true}
+{"t":…,"kind":"input","src":"input","what":"click","button":"left","x":512,"y":300,"window":"Scan settings"}
+{"t":…,"kind":"input","src":"input","what":"window","title":"Scan settings"}
+{"t":…,"kind":"mark","n":3,"note":"integration time 1 s"}                              // operator or agent mark
+{"t":…,"kind":"sync","n":1}                                                             // Sync button (manual sync)
+{"t":…,"kind":"status","text":"COM1 opened by VENDOR.EXE"}                              // human-readable notes
+{"t":…,"kind":"error","text":"camera disconnected"}
+```
+
+Serial tap: a chunk ends after `gap_ms` of silence on its line, or as soon as the other line starts talking. The
+raw bytes of each line are also in `raw/a.bin` and `raw/b.bin` (no timing). A `config` event at the start records the
+line settings the tap listened with.
+
+Camera stills (LibreTap): a full-resolution JPEG every `every_s` seconds while the picture changes, and at least one
+every 5 s when it does not; always `full: true`. `t` is when the frame reached the laptop (a frame or two late).
+
+Screen frames: the first frame and every Nth (default every 60th stored frame) are `full: true`; the others are
+changed regions to be painted over the previous picture. A reader rebuilds the screen at time T by taking the
+last full frame before T and painting the later regions up to T. Unchanged screenshots are not stored at all.
+
+## Projects (recordings)
+
+Every LibreTap recording is a project folder: `project.json` and the session folders inside it. Sessions added
+later (Tick's, from a USB stick) are copied in, so a recording is always one folder to keep or send.
+
+```
+20261130-101500/
+  project.json
+  20261130-101500-libretap/          LibreTap's session (the reference clock)
+  20261130-101448-WIN2000-LAB/       a Tick session, added
+```
+
+```json
+{"format": "libretap-project", "version": 1, "name": "20261130-101500",
+ "clock": "project_time = t + offset + drift * (t - t0), per session",
+ "sessions": [
+   {"path": "20261130-101500-libretap", "offset": 0, "drift": 0, "t0": 1796031300.1, "how": "reference", "match": {}},
+   {"path": "20261130-101448-WIN2000-LAB", "offset": 3587.6575, "drift": 7.995e-05, "t0": 1796027712.4,
+    "how": "traffic", "match": {"matches": 1241, "residual": 0.0009, "confidence": 0.98, "message": "…"}}]}
+```
+
+`path` is relative to the project folder (absolute when outside it). `how` is `reference`, `traffic`, `sync`, `manual`
+or `none` (not matched yet).
+
+## Clock matching (projects)
+
+Each recorder uses its own clock. A LibreTap project stores, per session, `offset` and `drift` so that
+`project_time = t + offset + drift * (t - t0)`. They come from:
+1. **traffic matching**: the same bytes in a Tick `api-serial` session and a LibreTap `serial-tap` session
+   (several matches give the drift);
+2. **manual sync**: `sync` events with the same `n` pressed on both at the same moment (about ±0.3 s).
+
+Traffic matching in LibreTap 0.1: each data event of one session (both directions: `out`↔`a`, `in`↔`b`) is looked
+up in the other session's byte stream of the same direction; every place it occurs gives a candidate time
+difference. A histogram (0.1 s bins, each event's vote shared among its candidates) finds the true difference even
+for a program that polls the same command over and over (the answers carry unique readings). Then a line is fitted
+through the closest candidate of each write (`out`/`a` only; reads reach Tick late), with shrinking windows, giving
+offset and drift (drift only when the matches span 30 s or more). The median lag of the reads is reported as
+`read_lag`. A result counts when at least 3 pieces agree and the best difference clearly beats the next best
+(`confidence` > 0.6); otherwise Sync presses are used.

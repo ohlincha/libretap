@@ -1,0 +1,199 @@
+name: Build installers
+# Installers for Linux (.deb: Debian 13, Ubuntu 24.04), Windows (Setup.exe) and macOS (universal .dmg), built from
+# app/ (adapted from LibreDrop's workflow). Each is installed and smoke-tested: the CLI records the demo instrument
+# headless, the window takes an offscreen screenshot. A tag v* publishes a GitHub release with whatever built;
+# manual runs (workflow_dispatch) only keep the files as run artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  QT_VERSION: "6.8.3"
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  deb:
+    name: Linux .deb (${{ matrix.tag }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:trixie", tag: debian13 }
+          - { image: "ubuntu:24.04", tag: ubuntu24.04 }
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    steps:
+      - name: Build tools and libraries
+        working-directory: /
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git cmake ninja-build g++ dpkg-dev file \
+            qt6-base-dev qt6-serialport-dev libgl1-mesa-dev ffmpeg
+      - uses: actions/checkout@v4
+      - name: Version
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          echo "LT_VERSION=$(packaging/version.sh)" >> "$GITHUB_ENV"
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - name: Package
+        run: |
+          (cd build && cpack)
+          mkdir -p dist
+          for f in build/libretap_*.deb; do mv "$f" "dist/$(basename "${f%.deb}")_${{ matrix.tag }}.deb"; done
+          dpkg-deb -I dist/*.deb
+          dpkg-deb -c dist/*.deb
+      - name: Install with apt and test
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ./dist/*.deb
+          dpkg -s libretap | grep -E '^(Version|Depends|Recommends):'
+          for f in /usr/bin/LibreTap /usr/bin/LibreTapCLI /usr/share/applications/io.github.ohlincha.libretap.desktop \
+                   /usr/share/icons/hicolor/256x256/apps/io.github.ohlincha.libretap.png; do
+            test -e "$f" || { echo "missing: $f"; exit 1; }
+          done
+          export LIBRETAP_HOME=$PWD/ws LIBRETAP_NO_SYSTEM_CAMERAS=1
+          LibreTapCLI record --demo --camera demo --seconds 3 | tee rec.txt
+          grep -q "stopped:" rec.txt
+          LibreTapCLI show latest | grep -q "MEAS?"
+          QT_QPA_PLATFORM=offscreen LIBRETAP_SHOT=shot.png,3 LibreTap --demo
+          test -s shot.png
+      - uses: actions/upload-artifact@v4
+        with: { name: "deb-${{ matrix.tag }}", path: app/dist/*.deb, if-no-files-found: error }
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with: { version: "${{ env.QT_VERSION }}", arch: win64_msvc2022_64, modules: qtserialport, cache: true }
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Version
+        shell: bash
+        run: echo "LT_VERSION=$(packaging/version.sh)" >> "$GITHUB_ENV"
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - run: cmake --install build --prefix dist/LibreTap
+      - name: Deploy Qt and ffmpeg
+        run: |
+          $d = "dist\LibreTap"
+          foreach ($exe in "LibreTap.exe", "LibreTapCLI.exe") {
+            windeployqt --release --no-compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw "$d\$exe"
+            if ($LASTEXITCODE -ne 0) { throw "windeployqt $exe failed" }
+          }
+          Copy-Item "$env:QT_ROOT_DIR\plugins\platforms\qoffscreen.dll" "$d\platforms\"
+          # ffmpeg (LGPL build, a separate program): the live camera through DirectShow
+          $z = "ffmpeg-n8.1-latest-win64-lgpl-8.1"
+          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$z.zip" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-dl
+          Copy-Item "ffmpeg-dl\$z\bin\ffmpeg.exe" $d
+          Copy-Item "ffmpeg-dl\$z\LICENSE.txt" "$d\ffmpeg-LICENSE.txt"
+      - name: Test the deployed folder (clean PATH, no Qt environment)
+        env: { QT_QPA_PLATFORM: offscreen, LIBRETAP_NO_SYSTEM_CAMERAS: "1" }
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          Remove-Item env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+          $env:LIBRETAP_HOME = "$PWD\ws"
+          dist\LibreTap\LibreTapCLI.exe record --demo --camera demo --seconds 3 | Tee-Object rec.txt
+          if (-not (Select-String -Quiet "stopped:" rec.txt)) { throw "headless recording failed" }
+          # the camera path through the bundled ffmpeg, with its test picture as the camera
+          dist\LibreTap\LibreTapCLI.exe record --no-tap --camera "ffmpeg:lavfi:testsrc2=size=320x240:rate=10" --seconds 3 | Tee-Object cam.txt
+          if (-not (Select-String -Quiet "stills" cam.txt)) { throw "ffmpeg camera failed" }
+          $env:LIBRETAP_SHOT = "shot.png,3"
+          $p = Start-Process dist\LibreTap\LibreTap.exe -ArgumentList "--demo" -Wait -PassThru -NoNewWindow
+          if (-not (Test-Path shot.png)) { throw "GUI did not run ($($p.ExitCode))" }
+      - name: Installer (Inno Setup)
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+            $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+          iscc /Qp "/DAppVersion=$env:LT_VERSION" packaging\windows\libretap.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
+      - uses: actions/upload-artifact@v4
+        with: { name: windows-setup, path: "app/dist/LibreTap-*-Windows-x64-Setup.exe", if-no-files-found: error }
+
+  macos:
+    name: macOS dmg (universal)
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with: { version: "${{ env.QT_VERSION }}", modules: qtserialport, cache: true }
+      - run: brew install ninja
+      - name: Version and icon
+        run: |
+          echo "LT_VERSION=$(packaging/version.sh)" >> "$GITHUB_ENV"
+          mkdir -p icon.iconset
+          for s in 16 32 64 128 256; do sips -z $s $s resources/icon.png --out icon.iconset/icon_${s}x${s}.png >/dev/null; done
+          iconutil -c icns icon.iconset -o resources/icon.icns
+      - run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure -E test_camera   # ffmpeg is bundled below, not installed
+      - run: cmake --install build --prefix dist-mac
+      - name: Deploy Qt and ffmpeg, sign ad hoc, test
+        run: |
+          APP=dist-mac/LibreTap.app
+          macdeployqt "$APP" -executable="$APP/Contents/MacOS/LibreTapCLI" -libpath="$QT_ROOT_DIR/lib"
+          # ffmpeg (static builds by Martin Riedl, pinned, both architectures joined): the live camera (AVFoundation)
+          get() { curl -fsSL -o "$3" "https://ffmpeg.martin-riedl.de/download/macos/$1/$2.zip" && echo "$4  $3" | shasum -a 256 -c; }
+          get arm64/1795207104_9.1 ffmpeg arm-ffmpeg.zip 1f66e9a690a7f1c9e60b012379f8869c11818d1797f45b21dbb2f2564ba61ae1
+          get amd64/1795212433_9.1 ffmpeg x86-ffmpeg.zip 35b3d82cccc2c1d644d49d15f5e57eb913a08ef68f798042c90eecec62c51f1e
+          for a in arm x86; do mkdir -p ff-$a; unzip -o -q $a-ffmpeg.zip -d ff-$a; done
+          lipo -create ff-arm/ffmpeg ff-x86/ffmpeg -output "$APP/Contents/MacOS/ffmpeg"; chmod +x "$APP/Contents/MacOS/ffmpeg"
+          { echo "ffmpeg in Contents/MacOS: static builds from https://ffmpeg.martin-riedl.de (FFmpeg 9.1),"
+            echo "licensed under the GNU GPL version 3 or later (below); sources at https://ffmpeg.org/download.html"
+            echo; curl -fsSL https://www.gnu.org/licenses/gpl-3.0.txt; } > "$APP/Contents/Resources/ffmpeg-LICENSE.txt"
+          cp "$QT_ROOT_DIR/plugins/platforms/libqoffscreen.dylib" "$APP/Contents/PlugIns/platforms/"
+          install_name_tool -add_rpath @loader_path/../../Frameworks "$APP/Contents/PlugIns/platforms/libqoffscreen.dylib"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+          export LIBRETAP_HOME=$PWD/ws LIBRETAP_NO_SYSTEM_CAMERAS=1
+          env -u QT_PLUGIN_PATH "$APP/Contents/MacOS/LibreTapCLI" record --demo --camera demo --seconds 3 | tee rec.txt
+          grep -q "stopped:" rec.txt
+          env -u QT_PLUGIN_PATH PATH=/usr/bin:/bin "$APP/Contents/MacOS/LibreTapCLI" record --no-tap --camera "ffmpeg:lavfi:testsrc2=size=320x240:rate=10" --seconds 3 | tee cam.txt
+          grep -q "stills" cam.txt
+          env -u QT_PLUGIN_PATH QT_QPA_PLATFORM=offscreen LIBRETAP_SHOT=shot.png,3 "$APP/Contents/MacOS/LibreTap" --demo
+          test -s shot.png
+      - name: dmg
+        run: |
+          mkdir -p dmg dist
+          ditto dist-mac/LibreTap.app dmg/LibreTap.app
+          ln -s /Applications dmg/Applications
+          out="dist/LibreTap-$LT_VERSION-macOS-universal.dmg"
+          for i in 1 2 3; do hdiutil create -volname LibreTap -srcfolder dmg -ov -format UDZO "$out" && break; sleep 10; done
+          test -f "$out" && ls -l "$out"
+      - uses: actions/upload-artifact@v4
+        with: { name: macos-dmg, path: "app/dist/LibreTap-*-macOS-universal.dmg", if-no-files-found: error }
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v') && !cancelled()
+    needs: [deb, windows, macos]
+    runs-on: ubuntu-24.04
+    permissions: { contents: write }
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: files, merge-multiple: true }
+      - name: Create or update the release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          ls -l files
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$tag" -R "$GITHUB_REPOSITORY" --title "LibreTap ${tag#v}" --notes "Installers for LibreTap ${tag#v}."
+          gh release upload "$tag" files/* -R "$GITHUB_REPOSITORY" --clobber

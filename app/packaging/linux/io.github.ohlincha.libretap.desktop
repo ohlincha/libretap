@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=LibreTap
+GenericName=Instrument Traffic Recorder
+Comment=Record what old vendor software says to its instrument, next to its screen
+Exec=LibreTap %f
+Icon=io.github.ohlincha.libretap
+Terminal=false
+Categories=Science;Development;
+Keywords=serial;RS-232;sniffer;protocol;instrument;reverse engineering;
+StartupWMClass=LibreTap
+Actions=Demo;
+
+[Desktop Action Demo]
+Name=LibreTap (demo, no hardware)
+Exec=LibreTap --demo
