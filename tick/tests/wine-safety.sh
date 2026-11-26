@@ -38,6 +38,7 @@ echo "A fakevendor.log:"; cat fakevendor.log; rm -f fakevendor.log
 echo "== B: kill the program while listening"
 "$WINE" Tick.exe /run "$vendor" COM1 40 300 &
 sleep 6
+import -window root "$out/B-listening.png"
 "$WINE" taskkill /f /im fakevendor.exe
 sleep 3
 "$WINE" tickctl.exe close

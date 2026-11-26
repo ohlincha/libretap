@@ -3,6 +3,7 @@
  * flushed at least once a second, so a crash or a pulled USB stick leaves a
  * readable session. */
 #include "tick.h"
+#include <tlhelp32.h>
 
 volatile LONG g_frames_stored, g_mark_n, g_sync_n;
 
@@ -19,6 +20,7 @@ static u64 started_us, ended_us, bytes;
 static DWORD last_flush;
 static int write_failed, dirty;
 static char note[256];
+static char capture_proc[MAX_PATH];
 
 static void lock(void)
 {
@@ -124,7 +126,17 @@ static void write_session_json(void)
     sb_str(&b, ", \"tile\": ");
     sb_u32(&b, g_cfg.tile);
     sb_str(&b, g_cfg.cursor ? ", \"cursor\": true" : ", \"cursor\": false");
-    sb_str(&b, g_cfg.mask_self ? ", \"tick_window_masked\": true}" : ", \"tick_window_masked\": false}");
+    sb_str(&b, g_cfg.mask_self ? ", \"tick_window_masked\": true" : ", \"tick_window_masked\": false");
+    sb_str(&b, g_cfg.program_only ? ", \"capture\": \"program-windows\"" : ", \"capture\": \"screen\"");
+    if (g_cfg.program_only) {
+        sbuf u;
+        sb_init(&u, 64);
+        ansi_to_utf8(&u, capture_proc);
+        sb_str(&b, ", \"capture_process\": ");
+        sb_json(&b, u.p ? u.p : "", u.len);
+        sb_free(&u);
+    }
+    sb_putc(&b, '}');
     sb_str(&b, ",\n  \"note\": ");
     {
         sbuf u;
@@ -230,6 +242,7 @@ int session_start(char *err, u32 errcap)
     lock();
     started_us = clock_now_us();
     ended_us = 0;
+    capture_proc[0] = 0;
     bytes = 0;
     write_failed = 0;
     nsrc = 0;
@@ -414,3 +427,38 @@ void session_flush_if_due(void)
 }
 
 int session_write_failed(void) { return write_failed; }
+
+void session_set_capture(const char *process)
+{
+    lock();
+    copy_str(capture_proc, process, sizeof capture_proc);
+    if (active) write_session_json();
+    unlock();
+}
+
+void process_name(DWORD pid, char *out)
+{
+    typedef HANDLE (WINAPI *SNAP)(DWORD, DWORD);
+    typedef BOOL (WINAPI *P32)(HANDLE, LPPROCESSENTRY32);
+    HMODULE k = GetModuleHandleA("kernel32.dll");
+    SNAP snap = (SNAP)(void *)GetProcAddress(k, "CreateToolhelp32Snapshot");
+    P32 first = (P32)(void *)GetProcAddress(k, "Process32First");
+    P32 next = (P32)(void *)GetProcAddress(k, "Process32Next");
+    HANDLE s;
+    PROCESSENTRY32 pe;
+    out[0] = 0;
+    if (!snap || !first || !next) return;
+    s = snap(TH32CS_SNAPPROCESS, 0);
+    if (s == INVALID_HANDLE_VALUE || !s) return;
+    memset(&pe, 0, sizeof pe);
+    pe.dwSize = sizeof pe;
+    if (first(s, &pe)) do {
+        if (pe.th32ProcessID == pid) {
+            const char *b = pe.szExeFile, *p;
+            for (p = pe.szExeFile; *p; p++) if (*p == '\\') b = p + 1;
+            copy_str(out, b, MAX_PATH);
+            break;
+        }
+    } while (next(s, &pe));
+    CloseHandle(s);
+}

@@ -13,6 +13,20 @@
  * or closes, it sets the ring's 'active' flag to 0 and the hooks pass every
  * call straight through. */
 #include "tick.h"
+#ifdef TICK_SCREEN_ONLY
+/* TickScreen.exe: screen recording only, no listener inside at all */
+int launch_program(const char *exe, const char *args, char *err, u32 errcap)
+{ (void)exe; (void)args; copy_str(err, "TickScreen records the screen only.", errcap); return 0; }
+int attach_process(DWORD pid, const char *name, char *err, u32 errcap)
+{ (void)pid; (void)name; copy_str(err, "TickScreen records the screen only.", errcap); return 0; }
+int listener_running(void) { return 0; }
+DWORD listener_pid(void) { return 0; }
+const char *listener_program(void) { return ""; }
+void listener_session_changed(void) {}
+void listener_detach_all(void) {}
+const char *listener_status(void) { return ""; }
+#else
+
 #include "ring.h"
 #include "resource.h"
 
@@ -22,9 +36,11 @@ static HANDLE hproc, hthread_reader, hmap, hstubmap;
 static ring_hdr *ring;
 static volatile int stop_reader, running;
 static char prog_name[MAX_PATH], prog_path[MAX_PATH];
+static DWORD target_pid;
 static char status_text[200];
 static u32 last_drops, bytes_in, bytes_out;
 static char ports_seen[64];
+static char port_desc[120];             /* "COM1: 9600 baud, 8N1, hardware handshake" (last settings seen) */
 static u8 *recbuf;
 
 static void lock(void)
@@ -42,22 +58,21 @@ static void set_status(void)
     sbuf b;
     sb_init(&b, 200);
     if (running) {
-        sb_str(&b, "Listening to ");
         sb_str(&b, prog_name);
         if (ports_seen[0]) {
-            sb_str(&b, ": ");
-            sb_str(&b, ports_seen);
-            sb_str(&b, ", ");
+            sb_str(&b, " opened ");
+            sb_str(&b, port_desc[0] ? port_desc : ports_seen);
+            sb_str(&b, "\r\nListening: ");
             sb_u32(&b, bytes_out);
-            sb_str(&b, " bytes out, ");
+            sb_str(&b, " bytes sent, ");
             sb_u32(&b, bytes_in);
-            sb_str(&b, " in");
-        } else sb_str(&b, " (no COM port opened yet)");
+            sb_str(&b, " received");
+        } else sb_str(&b, ": listening, no port opened yet");
         if (!session_active()) sb_str(&b, " - paused, not recording");
     } else if (prog_name[0]) {
         sb_str(&b, prog_name);
         sb_str(&b, " has ended.");
-    }
+    } else sb_str(&b, "Serial port too? Use \"Start a program...\" (recommended).");
     copy_str(status_text, b.p ? b.p : "", sizeof status_text);
     sb_free(&b);
 }
@@ -197,6 +212,23 @@ static void record_to_event(const ring_rec *r, const u8 *p)
                 sb_str(&b, ",\"xoff\":"); sb_u32(&b, (u8)d->XoffChar);
             }
             if (r->c) sb_str(&b, ",\"current\":true");     /* read from the port when attaching */
+            if (r->a) {                                     /* plain words for the window */
+                sbuf w;
+                sb_init(&w, 120);
+                sb_str(&w, r->port);
+                sb_str(&w, ": ");
+                sb_u32(&w, d->BaudRate);
+                sb_str(&w, " baud, ");
+                sb_u32(&w, d->ByteSize);
+                sb_putc(&w, d->Parity < 5 ? par[d->Parity] : '?');
+                sb_str(&w, d->StopBits == 0 ? "1" : d->StopBits == 1 ? "1.5" : "2");
+                if ((d->fRtsControl & 3) == 2 || d->fOutxCtsFlow) sb_str(&w, ", hardware handshake (RTS/CTS)");
+                else if ((d->fDtrControl & 3) == 2 || d->fOutxDsrFlow) sb_str(&w, ", hardware handshake (DTR/DSR)");
+                else if (d->fOutX || d->fInX) sb_str(&w, ", XON/XOFF handshake");
+                else sb_str(&w, ", no handshake");
+                copy_str(port_desc, w.p ? w.p : "", sizeof port_desc);
+                sb_free(&w);
+            }
             if (!r->a) sb_str(&b, ",\"ok\":false");
         } else { sb_free(&b); return; }
         break;
@@ -361,9 +393,11 @@ void listener_detach_all(void)
 
 /* ---------------- injection ---------------- */
 
-static int extract_dll(char *path)
+/* write one of Tick's embedded files (TickHook.dll, TickHook64.dll,
+ * TickHelper64.exe) into <session>\tick\ */
+static int extract_res(int id, const char *name, char *path)
 {
-    HRSRC r = FindResourceA(0, MAKEINTRESOURCEA(IDR_HOOKDLL), (LPCSTR)RT_RCDATA);
+    HRSRC r = FindResourceA(0, MAKEINTRESOURCEA(id), (LPCSTR)RT_RCDATA);
     HGLOBAL g = r ? LoadResource(0, r) : 0;
     void *p = g ? LockResource(g) : 0;
     DWORD n = r ? SizeofResource(0, r) : 0;
@@ -372,7 +406,8 @@ static int extract_dll(char *path)
     if (!p || !n) return 0;
     session_mkdir("tick");
     copy_str(path, session_dir(), MAX_PATH);
-    lstrcatA(path, "tick\\TickHook.dll");
+    lstrcatA(path, "tick\\");
+    lstrcatA(path, name);
     h = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
     if (h == INVALID_HANDLE_VALUE) {
         /* still in use by an earlier program of this session: fine if it is there */
@@ -381,6 +416,47 @@ static int extract_dll(char *path)
     if (!WriteFile(h, p, n, &w, 0) || w != n) { CloseHandle(h); return 0; }
     CloseHandle(h);
     return 1;
+}
+
+static int extract_dll(char *path) { return extract_res(IDR_HOOKDLL, "TickHook.dll", path); }
+
+/* ---------------- 64-bit Windows ---------------- */
+
+typedef BOOL (WINAPI *ISWOW64)(HANDLE, PBOOL);
+
+/* is this process (proc) a 32-bit one on 64-bit Windows? -1 = cannot tell */
+static int wow64(HANDLE proc)
+{
+    ISWOW64 f = (ISWOW64)(void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "IsWow64Process");
+    BOOL w = FALSE;
+    if (!f) return 0;               /* before XP SP2: no 64-bit Windows */
+    if (!f(proc, &w)) return -1;
+    return w != 0;
+}
+
+/* 64-bit programs: TickHelper64.exe does what Tick cannot do from 32 bits */
+static int run_helper64(const char *args, char *dll)
+{
+    char helper[MAX_PATH];
+    sbuf cmd;
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    DWORD code = 99;
+    if (!extract_res(IDR_HOOK64, "TickHook64.dll", dll) || !extract_res(IDR_HELPER64, "TickHelper64.exe", helper))
+        return 0;
+    sb_init(&cmd, 600);
+    sb_putc(&cmd, '"'); sb_str(&cmd, helper); sb_str(&cmd, "\" ");
+    sb_str(&cmd, args);
+    sb_str(&cmd, " \""); sb_str(&cmd, dll); sb_putc(&cmd, '"');
+    memset(&si, 0, sizeof si);
+    si.cb = sizeof si;
+    if (CreateProcessA(0, cmd.p, 0, 0, FALSE, 0x08000000 /* CREATE_NO_WINDOW */, 0, 0, &si, &pi)) {
+        if (WaitForSingleObject(pi.hProcess, 15000) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+    sb_free(&cmd);
+    return code == 0;
 }
 
 static void put32(u8 *p, u32 v) { p[0] = (u8)v; p[1] = (u8)(v >> 8); p[2] = (u8)(v >> 16); p[3] = (u8)(v >> 24); }
@@ -455,11 +531,13 @@ static int make_ring(DWORD pid, int mode)
     ring_init(ring, RING_DATA);
     ring->tick_pid = GetCurrentProcessId();
     ring->target_pid = pid;
+    target_pid = pid;
     ring->pad[0] = (u32)mode;             /* 1 started by Tick, 2 attached */
     ring->active = session_active() ? 1 : 0;
     last_drops = 0;
     bytes_in = bytes_out = 0;
     ports_seen[0] = 0;
+    port_desc[0] = 0;
     if (!recbuf) recbuf = rt_alloc(RING_MAXREC + 256);
     return recbuf != 0;
 }
@@ -521,8 +599,8 @@ static void copy_settings(const char *exe)
     }
 }
 
-/* 1 if the file is a 32-bit x86 Windows program (the only kind TickHook can enter) */
-static int exe_is_i386(const char *exe)
+/* machine of a Windows program: 0x14c (32-bit x86), 0x8664 (x64), 0 (not a PE program) */
+static u32 exe_machine(const char *exe)
 {
     u8 h[1024];
     DWORD n = 0;
@@ -534,8 +612,8 @@ static int exe_is_i386(const char *exe)
     if (n < 64 || h[0] != 'M' || h[1] != 'Z') return 0;
     off = h[60] | h[61] << 8 | h[62] << 16 | (u32)h[63] << 24;
     if (off + 6 > n) return 0;
-    return h[off] == 'P' && h[off + 1] == 'E' && h[off + 2] == 0 && h[off + 3] == 0 &&
-           h[off + 4] == 0x4c && h[off + 5] == 0x01;
+    if (h[off] != 'P' || h[off + 1] != 'E' || h[off + 2] || h[off + 3]) return 0;
+    return h[off + 4] | (u32)h[off + 5] << 8;
 }
 
 int launch_program(const char *exe, const char *args, char *err, u32 errcap)
@@ -547,11 +625,17 @@ int launch_program(const char *exe, const char *args, char *err, u32 errcap)
     CONTEXT ctx;
     u8 stub[512], *local9x;
     u32 remote, n;
-    int k;
+    int k, x64;
+    u32 machine = exe_machine(exe);
 
     if (running) { copy_str(err, "Tick is already listening to a program.", errcap); return 0; }
-    if (!exe_is_i386(exe)) {
-        copy_str(err, "This is not a 32-bit Windows program (64-bit, DOS or 16-bit?): Tick cannot listen to it. "
+    x64 = machine == 0x8664;
+    if (x64 && wow64(GetCurrentProcess()) != 1) {
+        copy_str(err, "This is a 64-bit program, but this Windows is not 64-bit.", errcap);
+        return 0;
+    }
+    if (machine != 0x14c && !x64) {
+        copy_str(err, "This is not a Windows program Tick can listen to (DOS, 16-bit or another processor?). "
                  "Start it normally; Tick still records the screen.", errcap);
         return 0;
     }
@@ -560,7 +644,7 @@ int launch_program(const char *exe, const char *args, char *err, u32 errcap)
     copy_str(prog_path, exe, MAX_PATH);
     base_name(prog_name, exe);
     if (g_cfg.copy_settings) copy_settings(exe);
-    if (!extract_dll(dll)) {
+    if (!x64 && !extract_dll(dll)) {
         unlock();
         copy_str(err, "Could not write TickHook.dll into the session folder.", errcap);
         return 0;
@@ -584,6 +668,26 @@ int launch_program(const char *exe, const char *args, char *err, u32 errcap)
     }
     sb_free(&cmd);
     hproc = pi.hProcess;
+    if (x64) {
+        sbuf a;
+        int ok;
+        sb_init(&a, 64);
+        sb_str(&a, "inject ");
+        sb_u32(&a, pi.dwProcessId);
+        sb_putc(&a, ' ');
+        sb_u32(&a, pi.dwThreadId);
+        ok = make_ring(pi.dwProcessId, 1) && run_helper64(a.p, dll);
+        sb_free(&a);
+        if (!ok) {
+            ResumeThread(pi.hThread);       /* run it anyway, just without listening */
+            CloseHandle(pi.hThread);
+            cleanup();
+            unlock();
+            copy_str(err, "The 64-bit program was started, but Tick could not listen to it.", errcap);
+            return 0;
+        }
+        goto started;
+    }
     memset(&ctx, 0, sizeof ctx);
     ctx.ContextFlags = CONTEXT_CONTROL;
     if (!make_ring(pi.dwProcessId, 1) || !GetThreadContext(pi.hThread, &ctx) ||
@@ -615,6 +719,7 @@ int launch_program(const char *exe, const char *args, char *err, u32 errcap)
         copy_str(err, "The program was started, but Tick could not listen to it.", errcap);
         return 0;
     }
+started:
     {
         sbuf b, u;
         sb_init(&b, 300);
@@ -624,7 +729,7 @@ int launch_program(const char *exe, const char *args, char *err, u32 errcap)
         sb_mem(&b, u.p, u.len);
         sb_str(&b, " (process ");
         sb_u32(&b, pi.dwProcessId);
-        sb_str(&b, ") and listening to its serial ports");
+        sb_str(&b, x64 ? ", 64-bit) and listening to its serial ports" : ") and listening to its serial ports");
         ev_status("status", b.p);
         sb_free(&b);
         sb_free(&u);
@@ -652,6 +757,22 @@ int attach_process(DWORD pid, const char *name, char *err, u32 errcap)
     hproc = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION |
                         PROCESS_VM_WRITE | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid);
     if (!hproc) { unlock(); copy_str(err, "Could not open that program (not allowed?).", errcap); return 0; }
+    if (wow64(GetCurrentProcess()) == 1 && wow64(hproc) == 0) {     /* 64-bit program */
+        sbuf a;
+        int ok;
+        sb_init(&a, 64);
+        sb_str(&a, "attach ");
+        sb_u32(&a, pid);
+        ok = make_ring(pid, 2) && run_helper64(a.p, dll);
+        sb_free(&a);
+        if (!ok) {
+            cleanup();
+            unlock();
+            copy_str(err, "Could not load the listener into that 64-bit program.", errcap);
+            return 0;
+        }
+        goto attached;
+    }
     if (!extract_dll(dll) || !make_ring(pid, 2) || !(remote = remote_mem(hproc, 512, &local9x))) {
         cleanup();
         unlock();
@@ -668,6 +789,7 @@ int attach_process(DWORD pid, const char *name, char *err, u32 errcap)
         return 0;
     }
     CloseHandle(t);
+attached:
     {
         sbuf b;
         sb_init(&b, 300);
@@ -683,3 +805,7 @@ int attach_process(DWORD pid, const char *name, char *err, u32 errcap)
     start_reader();
     return 1;
 }
+
+DWORD listener_pid(void) { return running ? target_pid : 0; }
+const char *listener_program(void) { return prog_name; }
+#endif

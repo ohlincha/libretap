@@ -180,3 +180,7 @@ kernel32.dll GetCommState
 kernel32.dll GetFileType
 kernel32.dll IsBadReadPtr
 kernel32.dll IsBadStringPtrA
+user32.dll EnumWindows
+user32.dll GetParent
+user32.dll GetWindowThreadProcessId
+user32.dll SetForegroundWindow

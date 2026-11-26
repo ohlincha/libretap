@@ -5,8 +5,12 @@
 #include <windows.h>
 #include "rt.h"
 
-#define TICK_VERSION "0.1.0"
+#define TICK_VERSION "0.2.0"
+#ifdef TICK_SCREEN_ONLY
+#define TICK_NAME    "TickScreen " TICK_VERSION
+#else
 #define TICK_NAME    "Tick " TICK_VERSION
+#endif
 
 /* ---- settings (Tick.ini next to Tick.exe, section [tick]) ---- */
 typedef struct {
@@ -17,6 +21,7 @@ typedef struct {
     int titles;             /* record the active window's title */
     int mask_self;          /* paint Tick's own window grey in screenshots */
     int topmost;            /* keep Tick above other windows */
+    int program_only;       /* screenshots show only the vendor program's windows */
     int copy_settings;      /* copy the started program's settings files into files/ */
     char dir[MAX_PATH];     /* sessions folder; "" = TickSessions next to Tick.exe */
 } tick_cfg;
@@ -61,7 +66,11 @@ int session_write_failed(void);
 void session_set_note(const char *note);
 extern volatile LONG g_frames_stored, g_mark_n, g_sync_n;
 
+void session_set_capture(const char *process);   /* program-only mode: whose windows */
+void process_name(DWORD pid, char *out);         /* exe name of a process, "" if unknown */
+
 /* ---- screen capture (capture.c) ---- */
+extern volatile DWORD g_pick_pid;
 int capture_start(void);
 void capture_stop(void);
 
@@ -72,6 +81,8 @@ int listener_running(void);
 void listener_session_changed(void);    /* recording started/stopped */
 void listener_detach_all(void);         /* Tick is closing */
 const char *listener_status(void);      /* short text for the window */
+DWORD listener_pid(void);               /* process listened to, 0 if none */
+const char *listener_program(void);     /* its exe name */
 
 #define WM_TICK_LISTENER (WM_APP + 1)   /* listener state changed */
 #define WM_TICK_ERROR    (WM_APP + 2)   /* lParam: static error text */

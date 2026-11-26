@@ -34,6 +34,7 @@ static char clock_text[32], last_msg[160];
 static DWORD rec_start_tick, flash_until, msg_until;
 static int flash_n;
 static WNDPROC note_proc;
+static DWORD pick_until;                /* "click the program's window" pending until */
 static char ini_path[MAX_PATH];
 
 #define SC(v) ((v) * S100 / 100)
@@ -52,6 +53,7 @@ void cfg_load(void)
     g_cfg.mask_self = GetPrivateProfileIntA("tick", "hide_tick_window", 1, ini_path) != 0;
     g_cfg.topmost = GetPrivateProfileIntA("tick", "on_top", 1, ini_path) != 0;
     g_cfg.copy_settings = GetPrivateProfileIntA("tick", "copy_settings", 1, ini_path) != 0;
+    g_cfg.program_only = GetPrivateProfileIntA("tick", "program_windows_only", 0, ini_path) != 0;
     GetPrivateProfileStringA("tick", "sessions_folder", "", g_cfg.dir, MAX_PATH, ini_path);
     if (g_cfg.interval_ms < 100) g_cfg.interval_ms = 100;
     if (g_cfg.interval_ms > 600000) g_cfg.interval_ms = 600000;
@@ -81,6 +83,7 @@ int cfg_save(void)
     ok = ok && put_int("hide_tick_window", (u32)g_cfg.mask_self);
     ok = ok && put_int("on_top", (u32)g_cfg.topmost);
     ok = ok && put_int("copy_settings", (u32)g_cfg.copy_settings);
+    ok = ok && put_int("program_windows_only", (u32)g_cfg.program_only);
     ok = ok && WritePrivateProfileStringA("tick", "sessions_folder", g_cfg.dir, ini_path);
     return ok != 0;
 }
@@ -254,9 +257,11 @@ static void create_controls(void)
     h_note = mk("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, 10, 165, 380, 22, IDC_NOTE, f_text);
     h_stat1 = mk("STATIC", "", SS_LEFT | SS_NOPREFIX, 10, 194, 380, 16, IDC_STAT1, f_text);
     h_stat2 = mk("STATIC", "", SS_LEFT | SS_NOPREFIX, 10, 211, 380, 16, IDC_STAT2, f_text);
-    h_stat3 = mk("STATIC", "", SS_LEFT | SS_NOPREFIX, 10, 228, 380, 16, IDC_STAT3, f_text);
-    mk("BUTTON", "Start a program...", BS_PUSHBUTTON | WS_TABSTOP, 10, 250, 150, 26, IDC_PROG, f_text);
-    mk("BUTTON", "Advanced...", BS_PUSHBUTTON | WS_TABSTOP, 290, 250, 100, 26, IDC_ADV, f_text);
+    h_stat3 = mk("STATIC", "", SS_LEFT | SS_NOPREFIX, 10, 228, 380, 32, IDC_STAT3, f_text);
+#ifndef TICK_SCREEN_ONLY
+    mk("BUTTON", "Start a program...", BS_PUSHBUTTON | WS_TABSTOP, 10, 264, 150, 26, IDC_PROG, f_text);
+#endif
+    mk("BUTTON", "Advanced...", BS_PUSHBUTTON | WS_TABSTOP, 290, 264, 100, 26, IDC_ADV, f_text);
     SendMessageA(h_note, EM_LIMITTEXT, 250, 0);
     note_proc = (WNDPROC)SetWindowLongA(h_note, GWL_WNDPROC, (LONG)(UINT_PTR)note_wndproc);
 }
@@ -350,6 +355,7 @@ static void tick_clock(void)
 
 /* ---------------- dialogs ---------------- */
 
+#ifndef TICK_SCREEN_ONLY
 static void pick_program(void)
 {
     OPENFILENAMEA ofn;
@@ -365,7 +371,7 @@ static void pick_program(void)
     ofn.lpstrFilter = "Programs (*.exe)\0*.exe\0All files\0*.*\0";
     ofn.lpstrFile = file;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrTitle = "Start a program and listen to its serial ports";
+    ofn.lpstrTitle = "Start the vendor program (Tick records what it does on its ports)";
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
     if (!GetOpenFileNameA(&ofn)) return;
     if (!start_recording()) return;
@@ -427,6 +433,37 @@ static INT_PTR CALLBACK attach_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
     return FALSE;
 }
 
+#endif
+
+/* "Pick the program's window": the next other window the operator activates */
+static void check_pick(void)
+{
+    HWND fg;
+    DWORD pid = 0;
+    char title[200];
+    sbuf b;
+    if (!pick_until) return;
+    if (GetTickCount() > pick_until) {
+        pick_until = 0;
+        show_msg("No window picked.");
+        return;
+    }
+    fg = GetForegroundWindow();
+    if (!fg || fg == g_hwnd || GetParent(fg) == g_hwnd) return;
+    GetWindowThreadProcessId(fg, &pid);
+    if (!pid || pid == GetCurrentProcessId()) return;
+    pick_until = 0;
+    g_pick_pid = pid;
+    title[0] = 0;
+    GetWindowTextA(fg, title, sizeof title);
+    sb_init(&b, 300);
+    sb_str(&b, "Picked: ");
+    sb_str(&b, title[0] ? title : "(untitled window)");
+    show_msg(b.p);
+    sb_free(&b);
+    SetForegroundWindow(g_hwnd);
+}
+
 static INT_PTR CALLBACK adv_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
 {
     (void)l;
@@ -439,8 +476,14 @@ static INT_PTR CALLBACK adv_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
         CheckDlgButton(d, IDC_MASK, g_cfg.mask_self ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(d, IDC_TOPMOST, g_cfg.topmost ? BST_CHECKED : BST_UNCHECKED);
         SetDlgItemTextA(d, IDC_DIR, g_cfg.dir);
+        CheckDlgButton(d, IDC_PROGONLY, g_cfg.program_only ? BST_CHECKED : BST_UNCHECKED);
+#ifndef TICK_SCREEN_ONLY
         CheckDlgButton(d, IDC_COPYSET, g_cfg.copy_settings ? BST_CHECKED : BST_UNCHECKED);
         if (g_win9x) EnableWindow(GetDlgItem(d, IDC_ATTACH), FALSE);
+#else
+        ShowWindow(GetDlgItem(d, IDC_COPYSET), SW_HIDE);
+        ShowWindow(GetDlgItem(d, IDC_ATTACH), SW_HIDE);
+#endif
         sb_init(&b, 300);
         sb_str(&b, TICK_NAME " - part of LibreTap. Options are saved in ");
         sb_str(&b, ini_path);
@@ -462,7 +505,10 @@ static INT_PTR CALLBACK adv_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
             g_cfg.mask_self = IsDlgButtonChecked(d, IDC_MASK) == BST_CHECKED;
             g_cfg.topmost = IsDlgButtonChecked(d, IDC_TOPMOST) == BST_CHECKED;
             GetDlgItemTextA(d, IDC_DIR, g_cfg.dir, MAX_PATH);
+#ifndef TICK_SCREEN_ONLY
             g_cfg.copy_settings = IsDlgButtonChecked(d, IDC_COPYSET) == BST_CHECKED;
+#endif
+            g_cfg.program_only = IsDlgButtonChecked(d, IDC_PROGONLY) == BST_CHECKED;
             SetWindowPos(g_hwnd, g_cfg.topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
             if (!cfg_save())
                 MessageBoxA(d, "Tick.ini could not be written (read-only folder?). The options apply until Tick is closed.",
@@ -485,6 +531,14 @@ static INT_PTR CALLBACK adv_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
             sb_free(&b);
             return TRUE;
         }
+        case IDC_PICKWIN:
+            g_cfg.program_only = 1;
+            EndDialog(d, IDCANCEL);
+            pick_until = GetTickCount() + 15000;
+            show_msg("Now click on the vendor program's window (15 s)...");
+            update_status();
+            return TRUE;
+#ifndef TICK_SCREEN_ONLY
         case IDC_ATTACH:
             if (listener_running()) {
                 MessageBoxA(d, "Tick is already listening to a program.", "Tick", MB_OK | MB_ICONINFORMATION);
@@ -493,6 +547,7 @@ static INT_PTR CALLBACK adv_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
             EndDialog(d, IDCANCEL);
             DialogBoxParamA(hinst, MAKEINTRESOURCEA(IDD_ATTACH), g_hwnd, attach_dlg, 0);
             return TRUE;
+#endif
         }
     }
     return FALSE;
@@ -531,7 +586,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         update_buttons();
         return 0;
     case WM_TIMER:
-        if (w == 1) tick_clock();
+        if (w == 1) { tick_clock(); check_pick(); }
         else { update_status(); session_flush_if_due(); }
         return 0;
     case WM_PAINT: {
@@ -555,7 +610,9 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         case IDC_MARK: do_mark(); SetFocus(h_note); return 0;
         case IDC_SYNC: do_sync(); SetFocus(h_note); return 0;
+#ifndef TICK_SCREEN_ONLY
         case IDC_PROG: pick_program(); return 0;
+#endif
         case IDC_ADV: DialogBoxParamA(hinst, MAKEINTRESOURCEA(IDD_ADV), h, adv_dlg, 0); update_status(); return 0;
         }
         break;
@@ -605,15 +662,18 @@ static void handle_cmdline(void)
 {
     const char *p = skip_arg(GetCommandLineA(), 0, 0);
     char a[MAX_PATH], err[300];
+    (void)err;
     while (*p) {
         p = skip_arg(p, a, sizeof a);
         if (!lstrcmpiA(a, "/start") || !lstrcmpiA(a, "-start")) start_recording();
+#ifndef TICK_SCREEN_ONLY
         else if (!lstrcmpiA(a, "/run") || !lstrcmpiA(a, "-run")) {
             p = skip_arg(p, a, sizeof a);
             if (a[0] && start_recording() && !launch_program(a, p, err, sizeof err))
                 MessageBoxA(g_hwnd, err, "Tick", MB_OK | MB_ICONERROR);
             break;                  /* the rest are the program's arguments */
         }
+#endif
     }
 }
 
@@ -657,14 +717,20 @@ void __stdcall TickMain(void)
     wc.lpszClassName = "TickRecorder";
     RegisterClassA(&wc);
 
-    r.left = 0; r.top = 0; r.right = SC(400); r.bottom = SC(286);
+    r.left = 0; r.top = 0; r.right = SC(400); r.bottom = SC(300);
     AdjustWindowRectEx(&r, style, FALSE, 0);
     if (!SystemParametersInfoA(SPI_GETWORKAREA, 0, &wa, 0)) {
         wa.left = wa.top = 0;
         wa.right = GetSystemMetrics(SM_CXSCREEN);
         wa.bottom = GetSystemMetrics(SM_CYSCREEN);
     }
-    CreateWindowExA(g_cfg.topmost ? WS_EX_TOPMOST : 0, "TickRecorder", "Tick - LibreTap recorder", style,
+    CreateWindowExA(g_cfg.topmost ? WS_EX_TOPMOST : 0, "TickRecorder",
+#ifdef TICK_SCREEN_ONLY
+                    "TickScreen - LibreTap screen recorder",
+#else
+                    "Tick - LibreTap recorder",
+#endif
+                    style,
                     wa.right - (r.right - r.left) - 8, wa.bottom - (r.bottom - r.top) - 8,
                     r.right - r.left, r.bottom - r.top, 0, 0, hinst, 0);
     if (!g_hwnd) ExitProcess(1);

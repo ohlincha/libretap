@@ -1,0 +1,7 @@
+#include "resource.h"
+
+/* The listener is carried inside Tick.exe so Tick stays one file; the 64-bit
+ * parts are only unpacked on 64-bit Windows, for 64-bit programs. */
+IDR_HOOKDLL RCDATA "../build/TickHook.dll"
+IDR_HOOK64 RCDATA "../build/TickHook64.dll"
+IDR_HELPER64 RCDATA "../build/TickHelper64.exe"

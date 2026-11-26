@@ -114,10 +114,13 @@ file. Full frames also carry `x`, `y` (0) and `w`, `h`. Tick also stores a full 
 changed, and its own window is painted flat grey in the pictures (`"tick": {"tick_window_masked": true}` in
 session.json) because its clock changes ten times a second. PNG files are 8-bit RGB.
 
-Tick session details (Tick 0.1):
+Tick session details (Tick 0.2; `recorder` is `"Tick 0.2.0"`, or `"TickScreen 0.2.0"` for the screen-only build):
 - session.json is rewritten when a source appears during recording (an `api-serial` source when the program first
   opens a COM port) and at the end (`ended`). It also has `utc_offset_min` (the PC's offset from UTC at the start)
-  and `tick` (its screenshot options). Folder name: `YYYYMMDD-HHMMSS-<computer name in lowercase>`.
+  and `tick` (its screenshot options). `tick.capture` is `"screen"` (whole screen, the default) or
+  `"program-windows"`: only the vendor program's visible top-level windows (dialogs included) are in the pictures,
+  everything else is black (0,0,0); `tick.capture_process` then names that program (`""` while none is chosen:
+  pictures are all black). Changes of the chosen program are also noted as `status` events. Folder name: `YYYYMMDD-HHMMSS-<computer name in lowercase>`.
 - `api-serial` source ids are the port in lowercase (`com1`); `com-attached` for a port that was already open when
   Tick attached to a running program (its name is then unknown).
 - `data`: `call` is `ReadFile`, `WriteFile`, `GetOverlappedResult` (an overlapped read completed),
@@ -136,8 +139,8 @@ Tick session details (Tick 0.1):
 - `status`/`error` texts tell when Tick started the program, when its listener became active, when the program
   ended (with exit code), and when listener records were lost because Tick could not keep up.
 - `files/` holds the program's small settings files (`*.ini`, `*.cfg`, `*.cnf`, `*.conf`, `*.set`, `*.par`, `*.prm`
-  from its folder, up to 1 MB each) copied before it started; `tick/TickHook.dll` is the listener Tick loaded into
-  the program (readers ignore it).
+  from its folder, up to 1 MB each) copied before it started; `tick/` holds the listener Tick loaded into the program: `TickHook.dll`, or for a
+  64-bit program `TickHook64.dll` and `TickHelper64.exe` (readers ignore this folder).
 
 ## Projects (recordings)
 

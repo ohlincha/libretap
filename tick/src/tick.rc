@@ -3,8 +3,6 @@
 
 IDI_TICK ICON "tick.ico"
 
-/* TickHook.dll is carried inside Tick.exe so Tick stays one file. */
-IDR_HOOKDLL RCDATA "../build/TickHook.dll"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION 0,1,0,0
@@ -32,7 +30,7 @@ BEGIN
   END
 END
 
-IDD_ADV DIALOG 0, 0, 260, 228
+IDD_ADV DIALOG 0, 0, 260, 262
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Tick - Advanced"
 FONT 8, "MS Sans Serif"
@@ -47,14 +45,16 @@ BEGIN
   AUTOCHECKBOX "Record the title of the active window", IDC_TITLES, 8, 54, 240, 10
   AUTOCHECKBOX "Leave Tick's own window out of screenshots", IDC_MASK, 8, 66, 240, 10
   AUTOCHECKBOX "Keep Tick on top of other windows", IDC_TOPMOST, 8, 78, 240, 10
-  AUTOCHECKBOX "Copy the started program's settings files (*.ini, *.cfg...)", IDC_COPYSET, 8, 90, 240, 10
-  LTEXT "Sessions folder (empty: TickSessions next to Tick.exe):", -1, 8, 106, 240, 8
-  EDITTEXT IDC_DIR, 8, 116, 244, 12, ES_AUTOHSCROLL
-  PUSHBUTTON "Open sessions folder", IDC_OPENDIR, 8, 134, 100, 14
-  PUSHBUTTON "Listen to a running program...", IDC_ATTACH, 120, 134, 132, 14
-  LTEXT "", IDC_INFO, 8, 156, 244, 40
-  DEFPUSHBUTTON "OK", IDOK, 146, 206, 50, 14
-  PUSHBUTTON "Cancel", IDCANCEL, 202, 206, 50, 14
+  AUTOCHECKBOX "Screenshots show only the vendor program's windows (rest black)", IDC_PROGONLY, 8, 90, 244, 10
+  PUSHBUTTON "Pick the program's window...", IDC_PICKWIN, 20, 102, 120, 14
+  AUTOCHECKBOX "Copy the started program's settings files (*.ini, *.cfg...)", IDC_COPYSET, 8, 122, 240, 10
+  LTEXT "Sessions folder (empty: TickSessions next to Tick.exe):", -1, 8, 138, 240, 8
+  EDITTEXT IDC_DIR, 8, 148, 244, 12, ES_AUTOHSCROLL
+  PUSHBUTTON "Open sessions folder", IDC_OPENDIR, 8, 166, 100, 14
+  PUSHBUTTON "Listen to a running program...", IDC_ATTACH, 120, 166, 132, 14
+  LTEXT "", IDC_INFO, 8, 188, 244, 48
+  DEFPUSHBUTTON "OK", IDOK, 146, 242, 50, 14
+  PUSHBUTTON "Cancel", IDCANCEL, 202, 242, 50, 14
 END
 
 
@@ -63,8 +63,8 @@ STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Listen to a running program"
 FONT 8, "MS Sans Serif"
 BEGIN
-  LTEXT "If the program opened its COM port before Tick listens, Tick sees the data but not the port settings. Starting the program from Tick is better.", -1, 8, 6, 204, 26
-  LISTBOX IDC_PROCLIST, 8, 34, 204, 140, LBS_NOTIFY | WS_VSCROLL | WS_BORDER | WS_TABSTOP
+  LTEXT "Only for a program that is in the middle of a measurement and cannot be restarted. Better: close it and use Start a program... Settings made before attaching are missed; Tick reads the current ones back once.", -1, 8, 4, 204, 30
+  LISTBOX IDC_PROCLIST, 8, 36, 204, 138, LBS_NOTIFY | WS_VSCROLL | WS_BORDER | WS_TABSTOP
   DEFPUSHBUTTON "Listen", IDOK, 106, 180, 50, 14
   PUSHBUTTON "Cancel", IDCANCEL, 162, 180, 50, 14
 END

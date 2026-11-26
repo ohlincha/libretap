@@ -124,6 +124,74 @@ static void draw_cursor(void)
     DrawIconEx(C.mdc, pt.x - C.hot_x - C.vx, pt.y - C.hot_y - C.vy, hc, 0, 0, 0, 0, DI_NORMAL);
 }
 
+/* ---- "vendor program only": keep the program's own windows, black out the rest ---- */
+
+volatile DWORD g_pick_pid;              /* window picked by the operator (when not listening) */
+static DWORD cur_pid = 0xffffffffu;
+static RECT wr[64];
+static int nwr;
+
+static BOOL CALLBACK enum_cb(HWND w, LPARAM pid)
+{
+    DWORD p = 0;
+    RECT r;
+    GetWindowThreadProcessId(w, &p);
+    if (p == (DWORD)pid && IsWindowVisible(w) && !IsIconic(w) && GetWindowRect(w, &r) && nwr < 64) wr[nwr++] = r;
+    return TRUE;
+}
+
+static void mask_program(u8 *bits)
+{
+    DWORD pid = listener_pid();
+    int y, i;
+    if (!pid) pid = g_pick_pid;
+    if (pid != cur_pid) {
+        sbuf b;
+        char name[MAX_PATH];
+        cur_pid = pid;
+        sb_init(&b, 200);
+        if (pid) {
+            process_name(pid, name);
+            sb_str(&b, "Screenshots show only the windows of ");
+            ansi_to_utf8(&b, name);
+            sb_str(&b, " (process ");
+            sb_u32(&b, pid);
+            sb_str(&b, "); the rest is black");
+            session_set_capture(name);
+        } else {
+            sb_str(&b, "Screenshots: vendor-program-only mode, but no program chosen: pictures are black");
+            session_set_capture("");
+        }
+        ev_status("status", b.p);
+        sb_free(&b);
+    }
+    nwr = 0;
+    if (pid) EnumWindows(enum_cb, (LPARAM)pid);
+    for (i = 0; i < nwr; i++) {             /* to bitmap coordinates, clipped */
+        wr[i].left -= C.vx; wr[i].right -= C.vx; wr[i].top -= C.vy; wr[i].bottom -= C.vy;
+        if (wr[i].left < 0) wr[i].left = 0;
+        if (wr[i].top < 0) wr[i].top = 0;
+        if (wr[i].right > C.w) wr[i].right = C.w;
+        if (wr[i].bottom > C.h) wr[i].bottom = C.h;
+    }
+    for (y = 0; y < C.h; y++) {
+        u8 *row = bits + (u32)y * C.w * 4;
+        int x = 0;
+        for (;;) {                          /* black from x to the next covered span */
+            int next = C.w, end = x;
+            for (i = 0; i < nwr; i++)
+                if (y >= wr[i].top && y < wr[i].bottom && wr[i].right > x) {
+                    if (wr[i].left <= x) { if (wr[i].right > end) end = wr[i].right; }
+                    else if (wr[i].left < next) next = wr[i].left;
+                }
+            if (end > x) { x = end; continue; }     /* x is covered: skip the span */
+            memset(row + x * 4, 0, (u32)(next - x) * 4);
+            x = next;
+            if (x >= C.w) break;
+        }
+    }
+}
+
 /* paint Tick's own window flat grey: its clock changes all the time */
 static void mask_self(u8 *bits)
 {
@@ -253,6 +321,7 @@ static void shot(void)
     GdiFlush();
     cur = C.bits[C.cur];
     prev = C.bits[C.cur ^ 1];
+    if (g_cfg.program_only) mask_program(cur);
     mask_self(cur);
 
     full = C.need_full || C.since_full + 1 >= g_cfg.full_every;
@@ -325,6 +394,7 @@ int capture_start(void)
     HMODULE u = GetModuleHandleA("user32.dll");
     pGetCursorInfo = u ? (GETCURSORINFO)(void *)GetProcAddress(u, "GetCursorInfo") : 0;
     memset(&C, 0, sizeof C);
+    cur_pid = 0xffffffffu;
     sb_init(&C.ev, 256);
     C.need_full = 1;
     if (g_cfg.titles)

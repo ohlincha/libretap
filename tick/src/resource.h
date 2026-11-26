@@ -1,5 +1,7 @@
 #define IDI_TICK        1
 #define IDR_HOOKDLL     2
+#define IDR_HOOK64      3
+#define IDR_HELPER64    4
 #define IDD_ADV         100
 #define IDD_ATTACH      101
 
@@ -15,3 +17,5 @@
 #define IDC_ATTACH      1010
 #define IDC_PROCLIST    1011
 #define IDC_INFO        1012
+#define IDC_PROGONLY    1013
+#define IDC_PICKWIN     1014

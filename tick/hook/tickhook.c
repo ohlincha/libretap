@@ -19,6 +19,12 @@
 #include "../src/rt.h"
 #include "../src/ring.h"
 
+#ifdef _WIN64
+#define MY_MACHINE IMAGE_FILE_MACHINE_AMD64     /* TickHook64.dll, for 64-bit programs */
+#else
+#define MY_MACHINE IMAGE_FILE_MACHINE_I386
+#endif
+
 static HINSTANCE self;
 static ring_hdr *R;
 static int use_qpc, attached, ready;
@@ -520,25 +526,25 @@ static void patch_module(u8 *base, u32 region)
     u32 rva, size;
     if (region < 512 || dos->e_magic != IMAGE_DOS_SIGNATURE || (u32)dos->e_lfanew > region - 256) return;
     nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
-    if (nt->Signature != IMAGE_NT_SIGNATURE || nt->FileHeader.Machine != IMAGE_FILE_MACHINE_I386) return;
+    if (nt->Signature != IMAGE_NT_SIGNATURE || nt->FileHeader.Machine != MY_MACHINE) return;
     rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
     size = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
     if (!rva || !size || rva >= nt->OptionalHeader.SizeOfImage) return;
     for (d = (IMAGE_IMPORT_DESCRIPTOR *)(base + rva); !IsBadReadPtr(d, sizeof *d) && d->Name; d++) {
-        u32 *slot;
+        UINT_PTR *slot;
         if (!d->FirstThunk || d->FirstThunk >= nt->OptionalHeader.SizeOfImage) continue;
-        for (slot = (u32 *)(base + d->FirstThunk); !IsBadReadPtr(slot, 4) && *slot; slot++) {
+        for (slot = (UINT_PTR *)(base + d->FirstThunk); !IsBadReadPtr(slot, sizeof *slot) && *slot; slot++) {
             u32 i;
             for (i = 0; i < NHOOKS; i++) {
-                if (*hooks[i].orig && *slot == (u32)(UINT_PTR)*hooks[i].orig) {
+                if (*hooks[i].orig && *slot == (UINT_PTR)*hooks[i].orig) {
                     DWORD old;
-                    if (VirtualProtect(slot, 4, PAGE_READWRITE, &old)) {
-                        *slot = (u32)(UINT_PTR)hooks[i].hook;
-                        VirtualProtect(slot, 4, old, &old);
+                    if (VirtualProtect(slot, sizeof *slot, PAGE_READWRITE, &old)) {
+                        *slot = (UINT_PTR)hooks[i].hook;
+                        VirtualProtect(slot, sizeof *slot, old, &old);
                         __sync_fetch_and_add(&patched_slots, 1);
-                    } else if (VirtualProtect(slot, 4, PAGE_EXECUTE_READWRITE, &old)) {
-                        *slot = (u32)(UINT_PTR)hooks[i].hook;
-                        VirtualProtect(slot, 4, old, &old);
+                    } else if (VirtualProtect(slot, sizeof *slot, PAGE_EXECUTE_READWRITE, &old)) {
+                        *slot = (UINT_PTR)hooks[i].hook;
+                        VirtualProtect(slot, sizeof *slot, old, &old);
                         __sync_fetch_and_add(&patched_slots, 1);
                     }
                     break;
@@ -552,7 +558,11 @@ static void patch_module(u8 *base, u32 region)
 static void scan_modules(void)
 {
     u8 *a = (u8 *)0x10000;
+#ifdef _WIN64
+    u8 *limit = (u8 *)(UINT_PTR)0x7ffffffeffffull;
+#else
     u8 *limit = (GetVersion() & 0x80000000u) ? (u8 *)0x80000000u : (u8 *)0xfffe0000u;
+#endif
     MEMORY_BASIC_INFORMATION mbi;
     char path[MAX_PATH];
     if (__sync_lock_test_and_set(&scan_lock, 1)) return;    /* another thread is scanning */
