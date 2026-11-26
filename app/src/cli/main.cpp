@@ -53,7 +53,7 @@ const char* const kUsage = R"(LibreTapCLI — record what old vendor software sa
   LibreTapCLI show REC [--hex] [--frames]    a recording as text (REC: folder, name, or "latest")
   LibreTapCLI match A B [--save]             clock offset and drift of session B against session A
   LibreTapCLI import REC SESSION             add a session folder (e.g. from Tick) to a recording and match it
-  LibreTapCLI decode-usb DUMP [--low] [--ftdi]   decode a usb-sniffer-lite text dump into transfers
+  LibreTapCLI decode-usb DUMP [--low] [--ftdi]   decode a usb-sniffer-lite text dump (or raw/usb_stream.bin) into transfers
   LibreTapCLI pcap FILE [--ip IP]            a pcap/pcapng file as conversations and packet summaries
   LibreTapCLI import-usbpcap FILE [--device VID:PID|ADDRESS]… [--hubs] [--all] [--name NAME]
                                              a Windows USBPcap capture as a new recording, chosen devices only
@@ -247,7 +247,7 @@ int cmdRecord(const QStringList& args) {
                 .arg(rec.projectFolder(),
                      o.demo ? QStringLiteral("demo instrument")
                             : QStringList{o.tap ? QStringLiteral("serial tap: PC side %1, instrument side %2, %3 baud %4").arg(tc.portA, tc.portB).arg(tc.line.baud).arg(tc.line.text()) : QString(),
-                                          o.usb ? QStringLiteral("USB sniffer on %1 (one capture: do one action, then stop)").arg(o.pico.port) : QString(),
+                                          o.usb ? QStringLiteral("USB sniffer on %1 (usb-sniffer-lite: one capture, do one action, then stop; USB Sniffer Stream: continuous)").arg(o.pico.port) : QString(),
                                           o.ethernet ? QStringLiteral("network on %1").arg(o.eth.iface.isEmpty() ? QStringLiteral("(auto)") : o.eth.iface) : QString()}
                                   .filter(QRegularExpression(QStringLiteral("."))).join(QStringLiteral("; "))));
     headerDone = true;
@@ -290,9 +290,11 @@ int cmdDecodeUsb(const QStringList& args) {
     }
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) return fail(QStringLiteral("cannot read %1").arg(path), 2);
-    const QString text = QString::fromLatin1(f.readAll());
+    const QByteArray bytes = f.readAll();
+    const QString text = QString::fromLatin1(bytes);
     UsbDecoder d(low || text.contains(QLatin1String("Capture speed       : Low")), ftdi);
-    d.feed(text);
+    if (bytes.startsWith(char(0xA5))) d.feedStream(bytes);   // USB Sniffer Stream's raw/usb_stream.bin
+    else d.feed(text);
     if (gJson) {
         QJsonArray evs;
         for (const UsbEvent& e : d.events) {

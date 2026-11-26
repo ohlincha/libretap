@@ -1,0 +1,4 @@
+firmware/make/build/
+tests/test_stream
+tests/build-emu/
+__pycache__/

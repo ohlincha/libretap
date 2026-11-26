@@ -64,7 +64,7 @@ Source kinds:
 | kind | recorder | data |
 |---|---|---|
 | `serial-tap` | LibreTap | two listen-only lines; `dir` is `a` (PC's TX) or `b` (instrument's TX); `names` gives labels |
-| `usb-pico` | LibreTap | Pico usb-sniffer-lite: `usb` events (control transfers, resets) and `data` per endpoint (below) |
+| `usb-pico` | LibreTap | Pico USB sniffer (usb-sniffer-lite or USB Sniffer Stream): `usb` events (control transfers, resets) and `data` per endpoint (below) |
 | `ethernet` | LibreTap | pcapng in `raw/`; `data` per TCP chunk / UDP datagram, `packet` summaries (below) |
 | `usbpcap` | LibreTap (import) | a Windows USBPcap capture read in: the same `usb` / `data` events as `usb-pico` |
 | `camera` | LibreTap | stills of the instrument PC's screen |
@@ -107,11 +107,21 @@ line settings the tap listened with.
 Camera stills (LibreTap): a full-resolution JPEG every `every_s` seconds while the picture changes, and at least one
 every 5 s when it does not; always `full: true`. `t` is when the frame reached the laptop (a frame or two late).
 
-USB through the Pico sniffer (`usb-pico`, LibreTap): one capture per recording (the sniffer holds 232 kB). The
-sniffer's text dump is kept in `raw/usb_cap.txt`; its decoded transfers are events. `dir` is `out` (host → device,
-i.e. the PC's side) or `in`; `addr` is the device address, `ep` the endpoint number; `what` says it in words;
-`t_ms` is the time in the dump (ms since the capture's first frame), and `t` = when Record started the capture +
-`t_ms` (about ±50 ms).
+USB through the Pico sniffer (`usb-pico`, LibreTap). The Pico runs one of two firmwares; LibreTap asks which (`v`)
+and the source entry says so (`firmware`, `mode`):
+- usb-sniffer-lite (`"mode":"capture"`): one capture per recording (the sniffer holds 232 kB). Its text dump is kept
+  in `raw/usb_cap.txt`; `t_ms` is the time in the dump (ms since the capture's first frame), and `t` = when Record
+  started the capture + `t_ms` (about ±50 ms).
+- USB Sniffer Stream (`"mode":"stream"`, LibreTap's own, `firmware/pico-usb-sniffer/`): continuous. The Pico drops
+  SOFs and NAKed polling and streams everything else as records (below), kept as received in `raw/usb_stream.bin`;
+  events are written while recording. `t_ms` is ms since the stream's HELLO record (the Pico's microsecond timer);
+  `t` maps that timer to the recorder's clock using the records the Pico sends as soon as it makes them (smallest
+  delay over the last 30 s; about ±2 ms). If the Pico's buffers overflow, a `usb` event says so:
+  `{"t":…,"kind":"usb","src":"usb","what":"lost 12 packets: the sniffer's buffers were full (12 not captured, 0 not sent)","lost":12,"t_ms":…}`
+  (and an `error` event the first time).
+
+Both give the same events: their decoded transfers. `dir` is `out` (host → device, i.e. the PC's side) or `in`;
+`addr` is the device address, `ep` the endpoint number; `what` says it in words.
 
 ```jsonc
 {"t":…,"kind":"usb","src":"usb","addr":5,"ep":0,"dir":"out","what":"FTDI SET_BAUD_RATE wValue=0x4138 … (about 9600 baud)","t_ms":12.3}
@@ -130,7 +140,22 @@ or the other direction), since such bridges often carry one character per transf
 Control transfers (endpoint 0) are `usb` events, with the data stage in `hex` except for descriptors (decoded in
 `what`). Bulk and interrupt payload is `data`, merged per endpoint until a short packet or a 10 ms pause (interrupt:
 one report each). `truncated: true` marks data the sniffer cut short (its "limit to 16 bytes" display setting).
-Source entry: `{"id":"usb","kind":"usb-pico","port":"/dev/ttyACM0","speed":"full","raw":"raw/usb_cap.txt","settings":{…}}`.
+Source entry: `{"id":"usb","kind":"usb-pico","port":"/dev/ttyACM0","speed":"full","raw":"raw/usb_cap.txt","settings":{…},
+"firmware":"usb-sniffer-lite","mode":"capture"}`; with USB Sniffer Stream `"raw":"raw/usb_stream.bin"`,
+`"firmware":"USB Sniffer Stream 1.0.0"`, `"mode":"stream"` (sessions from before 2026-11-27 have neither key: capture).
+
+`raw/usb_stream.bin` (USB Sniffer Stream, protocol 1) is a sequence of records, little-endian:
+`0xA5, type (1 byte), length (2), time (4: µs, the Pico's timer, wraps after 71.6 min), payload (length bytes),
+CRC-16/CCITT-FALSE (2; poly 0x1021, init 0xFFFF, over type to the end of the payload)`. A reader that meets a bad
+header or CRC skips one byte and looks for the next 0xA5. Types: 1 HELLO (u8 protocol, u8 speed 0 low / 1 full,
+u8 flags bit 0 = idle traffic kept, u8 0, u32 capture buffer bytes, u32 output buffer bytes, firmware name);
+2 PACKET (u8 error flags: 1 stuffing, 2 CRC, 4 PID, 8 sync, 16 bit count, 32 size, 128 truncated; then the packet
+from its PID byte: tokens and SOF PID + 2 bytes, data PID + data + CRC16, handshakes the PID); 3 RESET; 4 KEEPALIVE
+(low speed, only with idle traffic kept); 5 LOST (u32 packets not captured, u32 records not sent); 6 STATUS once a
+second and 8 END at the stop (u32 frames, u16 last frame number or 0xFFFF, u32 idle packets dropped, u32 packets
+sent, u32 packets with errors, u32 lost not captured, u32 lost not sent, u8 capture buffer peak %, u8 output buffer
+peak %); 7 TEXT (replies to commands). PACKET times are when the packet started on the bus. `LibreTapCLI decode-usb
+raw/usb_stream.bin` decodes a stream file again.
 
 Ethernet (`ethernet`, LibreTap): dumpcap writes `raw/eth_NNNNN_<date>.pcapng` (a ring of files, 50 MB each, 20 at
 most). TCP is reassembled per connection and direction (out-of-order segments held back, retransmitted bytes dropped)

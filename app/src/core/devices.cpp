@@ -4,6 +4,7 @@
 #include <QSerialPortInfo>
 
 #include "ethernet.h"
+#include "usbpico.h"
 
 #include <algorithm>
 
@@ -139,8 +140,8 @@ QJsonObject connectionsJson() {
     const CaptureAccess acc = captureAccess();
     QJsonArray sentences{g.sentence, camSentence};
     if (!picos.isEmpty())
-        sentences.append(QStringLiteral("USB sniffer ready (Pico on %1). It captures in short pieces: press Record, do one action, press Stop.")
-                             .arg(picos.first().toObject().value(QStringLiteral("port")).toString()));
+        sentences.append(picoSentence(picos.first().toObject().value(QStringLiteral("port")).toString(),
+                                      picos.first().toObject().value(QStringLiteral("description")).toString()));
     sentences.append(acc.sentence);
     return {{QStringLiteral("adapters"), adapters},
             {QStringLiteral("cameras"), cameras},

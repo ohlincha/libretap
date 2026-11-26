@@ -14,8 +14,9 @@ instrument.
 
 - **Serial tap**: a passive two-lead DB-9 tap and two USB-serial adapters (one per direction). The adapters only
   listen; nothing is ever sent.
-- **USB sniffer**: a Raspberry Pi Pico with usb-sniffer-lite spliced into the instrument's USB cable (low/full
-  speed). It captures in short pieces: press Record, do one action, press Stop. Control requests are named
+- **USB sniffer**: a Raspberry Pi Pico spliced into the instrument's USB cable (low/full speed). With LibreTap's own
+  firmware ([USB Sniffer Stream](firmware/pico-usb-sniffer/), a fork of usb-sniffer-lite) it records continuously
+  like the other sources; with usb-sniffer-lite it captures in short pieces (Record, one action, Stop). Control requests are named
   (descriptors, CDC, FTDI/CH34x/PL2303/CP210x), data is shown per endpoint.
 - **Ethernet**: a switch with port mirroring (e.g. TP-Link TL-SG105E) copies the instrument's and the PC's traffic to
   the laptop; Wireshark's dumpcap captures it, LibreTap shows the TCP/UDP conversations like serial traffic.

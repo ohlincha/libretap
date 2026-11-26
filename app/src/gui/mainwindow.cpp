@@ -618,8 +618,7 @@ void MainWindow::refreshConnections() {
     usbText_->setVisible(usbShown);
     useUsb_->setVisible(usbShown);
     if (usbShown) {
-        usbText_->setText(QStringLiteral("<b>USB sniffer ready</b> (Pico on %1). It captures in short pieces: press Record, do one action, press Stop.")
-                              .arg(picos.front().port));
+        usbText_->setText(picoSentence(picos.front().port, picos.front().description).replace(QStringLiteral("USB sniffer ready"), QStringLiteral("<b>USB sniffer ready</b>")));
         setDot(usbDot_, "ok");
     }
     // network
@@ -725,7 +724,7 @@ void MainWindow::updateRecordUi() {
     if (on) {
         const QJsonObject st = rec_.status();
         const QJsonObject s0 = st.value(QStringLiteral("stats")).toObject();
-        if (s0.contains(QStringLiteral("usb_events"))) {
+        if (s0.contains(QStringLiteral("usb_events")) && s0.value(QStringLiteral("usb_mode")).toString() != QLatin1String("stream")) {
             attention_->setText(QStringLiteral("USB: do one action, then press Stop. The sniffer's memory holds well under a minute."));
             attention_->setVisible(true);
         }
