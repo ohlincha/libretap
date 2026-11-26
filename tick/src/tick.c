@@ -54,6 +54,9 @@ void cfg_load(void)
     g_cfg.topmost = GetPrivateProfileIntA("tick", "on_top", 1, ini_path) != 0;
     g_cfg.copy_settings = GetPrivateProfileIntA("tick", "copy_settings", 1, ini_path) != 0;
     g_cfg.program_only = GetPrivateProfileIntA("tick", "program_windows_only", 0, ini_path) != 0;
+    g_cfg.rec_serial = GetPrivateProfileIntA("tick", "record_serial", 1, ini_path) != 0;
+    g_cfg.rec_net = GetPrivateProfileIntA("tick", "record_network", 1, ini_path) != 0;
+    g_cfg.rec_usb = GetPrivateProfileIntA("tick", "record_usb", 1, ini_path) != 0;
     GetPrivateProfileStringA("tick", "sessions_folder", "", g_cfg.dir, MAX_PATH, ini_path);
     if (g_cfg.interval_ms < 100) g_cfg.interval_ms = 100;
     if (g_cfg.interval_ms > 600000) g_cfg.interval_ms = 600000;
@@ -84,6 +87,9 @@ int cfg_save(void)
     ok = ok && put_int("on_top", (u32)g_cfg.topmost);
     ok = ok && put_int("copy_settings", (u32)g_cfg.copy_settings);
     ok = ok && put_int("program_windows_only", (u32)g_cfg.program_only);
+    ok = ok && put_int("record_serial", (u32)g_cfg.rec_serial);
+    ok = ok && put_int("record_network", (u32)g_cfg.rec_net);
+    ok = ok && put_int("record_usb", (u32)g_cfg.rec_usb);
     ok = ok && WritePrivateProfileStringA("tick", "sessions_folder", g_cfg.dir, ini_path);
     return ok != 0;
 }
@@ -479,8 +485,14 @@ static INT_PTR CALLBACK adv_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
         CheckDlgButton(d, IDC_PROGONLY, g_cfg.program_only ? BST_CHECKED : BST_UNCHECKED);
 #ifndef TICK_SCREEN_ONLY
         CheckDlgButton(d, IDC_COPYSET, g_cfg.copy_settings ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(d, IDC_RECSER, g_cfg.rec_serial ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(d, IDC_RECNET, g_cfg.rec_net ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(d, IDC_RECUSB, g_cfg.rec_usb ? BST_CHECKED : BST_UNCHECKED);
         if (g_win9x) EnableWindow(GetDlgItem(d, IDC_ATTACH), FALSE);
 #else
+        ShowWindow(GetDlgItem(d, IDC_RECSER), SW_HIDE);
+        ShowWindow(GetDlgItem(d, IDC_RECNET), SW_HIDE);
+        ShowWindow(GetDlgItem(d, IDC_RECUSB), SW_HIDE);
         ShowWindow(GetDlgItem(d, IDC_COPYSET), SW_HIDE);
         ShowWindow(GetDlgItem(d, IDC_ATTACH), SW_HIDE);
 #endif
@@ -507,6 +519,9 @@ static INT_PTR CALLBACK adv_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
             GetDlgItemTextA(d, IDC_DIR, g_cfg.dir, MAX_PATH);
 #ifndef TICK_SCREEN_ONLY
             g_cfg.copy_settings = IsDlgButtonChecked(d, IDC_COPYSET) == BST_CHECKED;
+            g_cfg.rec_serial = IsDlgButtonChecked(d, IDC_RECSER) == BST_CHECKED;
+            g_cfg.rec_net = IsDlgButtonChecked(d, IDC_RECNET) == BST_CHECKED;
+            g_cfg.rec_usb = IsDlgButtonChecked(d, IDC_RECUSB) == BST_CHECKED;
 #endif
             g_cfg.program_only = IsDlgButtonChecked(d, IDC_PROGONLY) == BST_CHECKED;
             SetWindowPos(g_hwnd, g_cfg.topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);

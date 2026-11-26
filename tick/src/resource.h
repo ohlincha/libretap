@@ -19,3 +19,6 @@
 #define IDC_INFO        1012
 #define IDC_PROGONLY    1013
 #define IDC_PICKWIN     1014
+#define IDC_RECSER      1015
+#define IDC_RECNET      1016
+#define IDC_RECUSB      1017

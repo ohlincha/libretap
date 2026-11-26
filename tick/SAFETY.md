@@ -91,6 +91,15 @@ antivirus product.
 slower anyway, open *Advanced...* and take a screenshot every 1000 or 2000 ms instead of 500; or press Stop. The
 listener adds only a memory copy to each serial call (not measured on an old PC). *Not tested* on a really old PC (Pentium II class).
 
+## Network and USB
+
+When Tick listens to a program it also records the program's network connections and USB devices (Advanced can
+leave either out). Tick still only watches: it never sends anything to the network or to a device, and it does not
+change the program's connections. The same rules as for serial ports apply (the real call first, results and
+errors unchanged, never waiting). Data the program sends over the network is in the session, so do not share a
+session if the program sends passwords or private data in plain text. *Tested under Wine* with 32- and 64-bit test
+programs (network to a local fake instrument; a device handle with HID calls); *not tested* with a real USB device.
+
 ## Tick for Linux
 
 The same rules hold: nothing is installed, no root is needed, the session folder (`TickSessions` next to `tick`,

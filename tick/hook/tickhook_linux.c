@@ -28,6 +28,9 @@
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <linux/usbdevice_fs.h>
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -68,7 +71,22 @@ static ring_hdr *R;
 static volatile int init_done;
 
 #define MAXFD 1024
-static char ports[MAXFD][8];        /* "t3": short id of a tracked tty, "" = not tracked */
+static char ports[MAXFD][8];        /* "t3" tty, "u2" USB device, "n5" socket; "-" checked: not a TCP/UDP
+                                       socket; "" = not tracked */
+static tick_net nets[MAXFD];        /* addresses of tracked sockets */
+
+static int left_out(u32 kind) { return R && (R->pad[2] & kind); }
+
+static void new_port(char *port, char kind, volatile u32 *counter)
+{
+    u32 n = __sync_add_and_fetch(counter, 1);
+    char d[8];
+    int i = 0, j = 1;
+    port[0] = kind;
+    do { d[i++] = (char)('0' + n % 10); n /= 10; } while (n && i < 6);
+    while (i) port[j++] = d[--i];
+    port[j] = 0;
+}
 
 static void init(void)
 {
@@ -123,7 +141,7 @@ static void emit(u16 type, int fd, const char *port, u32 a, u32 b, u32 c, const 
 
 static int tracked(int fd, char *port)
 {
-    if (fd < 0 || fd >= MAXFD || !ports[fd][0]) return 0;
+    if (fd < 0 || fd >= MAXFD || !ports[fd][0] || ports[fd][0] == '-') return 0;
     tk_memcpy(port, ports[fd], 8);
     return 1;
 }
@@ -152,15 +170,15 @@ static void after_open(const char *path, long fd, int flags)
     }
     if (fd >= MAXFD || streq(path, "/dev/tty") || streq(path, "/dev/console") || streq(path, "/dev/ptmx")) return;
     err = *__errno_location();
-    if (sc(SYS_ioctl, fd, TCGETS, (long)&k, 0, 0, 0) < 0) { *__errno_location() = err; return; }  /* not a tty */
-    n = __sync_add_and_fetch(&R->pad[1], 1);
-    port[0] = 't';
-    {
-        char d[8];
-        int i = 0, j = 1;
-        do { d[i++] = (char)('0' + n % 10); n /= 10; } while (n && i < 6);
-        while (i) port[j++] = d[--i];
-        port[j] = 0;
+    (void)n;
+    if (starts(path, "/dev/bus/usb/") || starts(path, "/dev/hidraw") || starts(path, "/dev/usbtmc") ||
+        starts(path, "/dev/usb/")) {                /* USB: usbfs (libusb), HID, USBTMC instruments */
+        if (left_out(KIND_USB)) return;
+        new_port(port, 'u', &R->pad[3]);
+    } else {
+        if (sc(SYS_ioctl, fd, TCGETS, (long)&k, 0, 0, 0) < 0) { *__errno_location() = err; return; }  /* not a tty */
+        if (left_out(KIND_SERIAL)) { *__errno_location() = err; return; }
+        new_port(port, 't', &R->pad[1]);
     }
     tk_memcpy(ports[fd], port, 8);
     emit(REC_OPEN, (int)fd, port, 1, 0, (u32)flags, path, slen(path), 0, 0);
@@ -224,13 +242,25 @@ int __open64_2(const char *path, int flags) { return open(path, flags); }
 int __openat_2(int dir, const char *path, int flags) { return openat(dir, path, flags); }
 int __openat64_2(int dir, const char *path, int flags) { return openat(dir, path, flags); }
 
+static void net_emit(u16 type, int fd, u32 call, u32 a, u32 b, const void *peer, u32 peerlen, const void *data, u32 n)
+{
+    tick_net ni = nets[fd];
+    if (peer && peerlen) {
+        u32 k = peerlen < 28 ? peerlen : 28;
+        tk_memset(ni.remote, 0, 28);
+        tk_memcpy(ni.remote, peer, k);
+    }
+    emit(type, fd, ports[fd], a, b, call, &ni, sizeof ni, data, n);
+}
+
 ssize_t read(int fd, void *buf, size_t n)
 {
     long r = ret(sc(SYS_read, fd, (long)buf, (long)n, 0, 0, 0));
     char port[8];
     if (r > 0 && tracked(fd, port) && on()) {
         int e = *__errno_location();
-        emit(REC_READ, fd, port, (u32)n, 0, 1, buf, (u32)r, 0, 0);
+        if (port[0] == 'n') net_emit(REC_NET_RECV, fd, CALL_READ, (u32)n, 0, 0, 0, buf, (u32)r);
+        else emit(REC_READ, fd, port, (u32)n, 0, 1, buf, (u32)r, 0, 0);
         *__errno_location() = e;
     }
     return r;
@@ -244,10 +274,17 @@ ssize_t write(int fd, const void *buf, size_t n)
     char port[8];
     if (n && tracked(fd, port) && on()) {
         int e = *__errno_location();
-        emit(REC_WRITE, fd, port, (u32)n, r < 0 ? 0 : (u32)r, 2, buf, (u32)n, 0, 0);
+        if (port[0] == 'n') net_emit(REC_NET_SEND, fd, CALL_WRITE, (u32)n, r < 0 ? 0 : (u32)r, 0, 0, buf, (u32)n);
+        else emit(REC_WRITE, fd, port, (u32)n, r < 0 ? 0 : (u32)r, 2, buf, (u32)n, 0, 0);
         *__errno_location() = e;
     }
     return r;
+}
+
+static void iov_out(u16 type, int fd, const char *port, u32 call, const u8 *p, u32 n)
+{
+    if (port[0] == 'n') net_emit(type == REC_READ ? REC_NET_RECV : REC_NET_SEND, fd, call, n, n, 0, 0, p, n);
+    else emit(type, fd, port, n, n, call, p, n, 0, 0);
 }
 
 static void emit_iov(u16 type, int fd, const char *port, const struct iovec *iov, int cnt, long total, u32 call)
@@ -263,10 +300,10 @@ static void emit_iov(u16 type, int fd, const char *port, const struct iovec *iov
             u32 k = len < sizeof tmp - used ? len : (u32)sizeof tmp - used;
             tk_memcpy(tmp + used, p, k);
             used += k; p += k; len -= k;
-            if (used == sizeof tmp) { emit(type, fd, port, used, used, call, tmp, used, 0, 0); used = 0; }
+            if (used == sizeof tmp) { iov_out(type, fd, port, call, tmp, used); used = 0; }
         }
     }
-    if (used) emit(type, fd, port, used, used, call, tmp, used, 0, 0);
+    if (used) iov_out(type, fd, port, call, tmp, used);
 }
 
 ssize_t readv(int fd, const struct iovec *iov, int cnt)
@@ -293,6 +330,51 @@ ssize_t writev(int fd, const struct iovec *iov, int cnt)
     return r;
 }
 
+/* usbfs (libusb and friends): control, bulk and asynchronous URB transfers */
+static int usbfs(int fd, const char *port, unsigned long req, void *arg, long r)
+{
+    if (!arg) return 0;
+    if (req == USBDEVFS_CONTROL) {
+        const struct usbdevfs_ctrltransfer *c = arg;
+        u8 setup[8];
+        u32 n = (c->bRequestType & 0x80) ? (r > 0 ? (u32)r : 0) : c->wLength;
+        setup[0] = c->bRequestType; setup[1] = c->bRequest;
+        setup[2] = (u8)c->wValue; setup[3] = (u8)(c->wValue >> 8);
+        setup[4] = (u8)c->wIndex; setup[5] = (u8)(c->wIndex >> 8);
+        setup[6] = (u8)c->wLength; setup[7] = (u8)(c->wLength >> 8);
+        if (!c->data) n = 0;
+        emit(REC_USB_CTRL, fd, port, r >= 0, r > 0 ? (u32)r : 0, CALL_USBFS_CONTROL, setup, 8, c->data, n);
+        return 1;
+    }
+    if (req == USBDEVFS_BULK) {
+        const struct usbdevfs_bulktransfer *b = arg;
+        u32 n = (b->ep & 0x80) ? (r > 0 ? (u32)r : 0) : b->len;
+        if (!b->data) n = 0;
+        emit(REC_USB_XFER, fd, port, r >= 0, b->ep & 0xff, CALL_USBFS_BULK, b->data, n, 0, 0);
+        return 1;
+    }
+    if (req == USBDEVFS_SUBMITURB || req == USBDEVFS_REAPURB || req == USBDEVFS_REAPURBNDELAY) {
+        const struct usbdevfs_urb *u = req == USBDEVFS_SUBMITURB ? arg : (r == 0 ? *(struct usbdevfs_urb **)arg : 0);
+        int submit = req == USBDEVFS_SUBMITURB, in;
+        if (!u || u->type == USBDEVFS_URB_TYPE_ISO || !u->buffer) return 1;
+        if (u->type == USBDEVFS_URB_TYPE_CONTROL) {
+            const u8 *sp = u->buffer;
+            in = (sp[0] & 0x80) != 0;
+            if (u->buffer_length < 8) return 1;
+            if (submit && !in) emit(REC_USB_CTRL, fd, port, r == 0, 0, CALL_USBFS_SUBMIT, sp, 8, sp + 8, (u32)u->buffer_length - 8);
+            else if (!submit && in) emit(REC_USB_CTRL, fd, port, u->status == 0, (u32)u->actual_length, CALL_USBFS_REAP, sp, 8,
+                                         sp + 8, u->actual_length > 0 ? (u32)u->actual_length : 0);
+            return 1;
+        }
+        in = (u->endpoint & 0x80) != 0;
+        if (submit && !in) emit(REC_USB_XFER, fd, port, r == 0, u->endpoint, CALL_USBFS_SUBMIT, u->buffer, (u32)u->buffer_length, 0, 0);
+        else if (!submit && in) emit(REC_USB_XFER, fd, port, u->status == 0, u->endpoint, CALL_USBFS_REAP, u->buffer,
+                                     u->actual_length > 0 ? (u32)u->actual_length : 0, 0, 0);
+        return 1;
+    }
+    return 0;
+}
+
 int ioctl(int fd, unsigned long req, ...)
 {
     va_list ap;
@@ -305,6 +387,7 @@ int ioctl(int fd, unsigned long req, ...)
     r = ret(sc(SYS_ioctl, fd, (long)req, (long)arg, 0, 0, 0));
     if (tracked(fd, port) && on() && req != TCGETS && req != TIOCMGET && req != FIONREAD && req != TIOCOUTQ) {
         int e = *__errno_location();
+        if (port[0] == 'u' && usbfs(fd, port, req, arg, r)) { *__errno_location() = e; return (int)r; }
         switch (req) {
         case TCSETS: case TCSETSW: case TCSETSF:
             if (arg) emit_termios(fd, port, arg, r == 0, 2);
@@ -380,10 +463,128 @@ int close(int fd)
     long r;
     if (t) ports[fd][0] = 0;
     r = ret(sc(SYS_close, fd, 0, 0, 0, 0, 0));
+    if (fd >= 0 && fd < MAXFD && ports[fd][0] == '-') ports[fd][0] = 0;
     if (t && on()) {
         int e = *__errno_location();
-        emit(REC_CLOSE, fd, port, r == 0, 0, 0, 0, 0, 0, 0);
+        if (port[0] == 'n') emit(REC_NET_CLOSE, fd, port, 0, 0, CALL_CLOSESOCKET, &nets[fd], sizeof nets[fd], 0, 0);
+        else emit(REC_CLOSE, fd, port, r == 0, 0, 0, 0, 0, 0, 0);
         *__errno_location() = e;
     }
     return (int)r;
+}
+
+/* ---------------- sockets (TCP/UDP over IPv4/IPv6) ---------------- */
+
+/* is fd a TCP/UDP socket? then track it ('n' port) with its addresses */
+static int sock_track(int fd, const void *remote, u32 rlen)
+{
+    u8 la[128];
+    u32 ll = sizeof la, rl = 28, type = 0, tl = sizeof type;
+    u16 fam;
+    if (fd < 0 || fd >= MAXFD || !on() || left_out(KIND_NET)) return 0;
+    if (ports[fd][0] == 'n') return 1;
+    if (ports[fd][0]) return 0;                      /* a tty/usb fd, or known not to be a socket of interest */
+    if (sc(SYS_getsockname, fd, (long)la, (long)&ll, 0, 0, 0) < 0) { ports[fd][0] = '-'; ports[fd][1] = 0; return 0; }
+    fam = (u16)(la[0] | la[1] << 8);
+    if (fam != AF_INET && fam != AF_INET6) { ports[fd][0] = '-'; ports[fd][1] = 0; return 0; }
+    sc(SYS_getsockopt, fd, SOL_SOCKET, SO_TYPE, (long)&type, (long)&tl, 0);
+    tk_memset(&nets[fd], 0, sizeof nets[fd]);
+    nets[fd].proto = type == SOCK_DGRAM ? 17 : 6;
+    tk_memcpy(nets[fd].local, la, ll < 28 ? ll : 28);
+    if (remote && rlen) tk_memcpy(nets[fd].remote, remote, rlen < 28 ? rlen : 28);
+    else if (sc(SYS_getpeername, fd, (long)la, (long)&rl, 0, 0, 0) == 0) tk_memcpy(nets[fd].remote, la, rl < 28 ? rl : 28);
+    new_port(ports[fd], 'n', &R->pad[4]);
+    return 1;
+}
+
+static void sock_refresh(int fd)
+{
+    u8 a[128];
+    u32 l = sizeof a;
+    if (sc(SYS_getsockname, fd, (long)a, (long)&l, 0, 0, 0) == 0) { tk_memset(nets[fd].local, 0, 28); tk_memcpy(nets[fd].local, a, l < 28 ? l : 28); }
+    l = sizeof a;
+    if (sc(SYS_getpeername, fd, (long)a, (long)&l, 0, 0, 0) == 0) { tk_memset(nets[fd].remote, 0, 28); tk_memcpy(nets[fd].remote, a, l < 28 ? l : 28); }
+}
+
+int connect(int fd, const struct sockaddr *a, socklen_t n)
+{
+    long r = ret(sc(SYS_connect, fd, (long)a, n, 0, 0, 0));
+    int e = *__errno_location();
+    if (a && (a->sa_family == AF_INET || a->sa_family == AF_INET6) && sock_track(fd, a, n)) {
+        if (r == 0) sock_refresh(fd);
+        tk_memset(nets[fd].remote, 0, 28);
+        tk_memcpy(nets[fd].remote, a, n < 28 ? n : 28);
+        net_emit(REC_NET_OPEN, fd, CALL_CONNECT, r == 0 || e == 115 /* EINPROGRESS */, r == 0 ? 0 : (u32)e, 0, 0, 0, 0);
+    }
+    *__errno_location() = e;
+    return (int)r;
+}
+
+static int after_accept(long r)
+{
+    int e = *__errno_location();
+    if (r >= 0 && sock_track((int)r, 0, 0)) {
+        sock_refresh((int)r);
+        net_emit(REC_NET_OPEN, (int)r, CALL_ACCEPT, 1, 0, 0, 0, 0, 0);
+    }
+    *__errno_location() = e;
+    return (int)r;
+}
+
+int accept(int fd, struct sockaddr *a, socklen_t *n) { return after_accept(ret(sc(SYS_accept4, fd, (long)a, (long)n, 0, 0, 0))); }
+int accept4(int fd, struct sockaddr *a, socklen_t *n, int fl) { return after_accept(ret(sc(SYS_accept4, fd, (long)a, (long)n, fl, 0, 0))); }
+
+ssize_t sendto(int fd, const void *buf, size_t n, int fl, const struct sockaddr *to, socklen_t tl)
+{
+    long r = ret(sc(SYS_sendto, fd, (long)buf, (long)n, fl, (long)to, tl));
+    int e = *__errno_location();
+    if (n && sock_track(fd, to, to ? tl : 0))
+        net_emit(REC_NET_SEND, fd, to ? CALL_SENDTO : CALL_SEND, (u32)n, r < 0 ? 0 : (u32)r, to, to ? tl : 0, buf, (u32)n);
+    *__errno_location() = e;
+    return r;
+}
+
+ssize_t send(int fd, const void *buf, size_t n, int fl) { return sendto(fd, buf, n, fl, 0, 0); }
+
+ssize_t recvfrom(int fd, void *buf, size_t n, int fl, struct sockaddr *from, socklen_t *fl2)
+{
+    long r = ret(sc(SYS_recvfrom, fd, (long)buf, (long)n, fl, (long)from, (long)fl2));
+    int e = *__errno_location();
+    if (r > 0 && sock_track(fd, 0, 0))
+        net_emit(REC_NET_RECV, fd, from ? CALL_RECVFROM : CALL_RECV, (u32)n, 0, from, from && fl2 ? *fl2 : 0, buf, (u32)r);
+    *__errno_location() = e;
+    return r;
+}
+
+ssize_t recv(int fd, void *buf, size_t n, int fl) { return recvfrom(fd, buf, n, fl, 0, 0); }
+ssize_t __recv_chk(int fd, void *buf, size_t n, size_t bl, int fl) { (void)bl; return recvfrom(fd, buf, n, fl, 0, 0); }
+ssize_t __recvfrom_chk(int fd, void *buf, size_t n, size_t bl, int fl, struct sockaddr *f, socklen_t *l)
+{ (void)bl; return recvfrom(fd, buf, n, fl, f, l); }
+
+ssize_t sendmsg(int fd, const struct msghdr *m, int fl)
+{
+    long r = ret(sc(SYS_sendmsg, fd, (long)m, fl, 0, 0, 0));
+    int e = *__errno_location();
+    if (r > 0 && m && sock_track(fd, m->msg_name, m->msg_name ? m->msg_namelen : 0)) {
+        char port[8];
+        tk_memcpy(port, ports[fd], 8);
+        if (m->msg_name) { tk_memset(nets[fd].remote, 0, 28); tk_memcpy(nets[fd].remote, m->msg_name, m->msg_namelen < 28 ? m->msg_namelen : 28); }
+        emit_iov(REC_WRITE, fd, port, m->msg_iov, (int)m->msg_iovlen, r, CALL_SENDMSG);
+    }
+    *__errno_location() = e;
+    return r;
+}
+
+ssize_t recvmsg(int fd, struct msghdr *m, int fl)
+{
+    long r = ret(sc(SYS_recvmsg, fd, (long)m, fl, 0, 0, 0));
+    int e = *__errno_location();
+    if (r > 0 && m && sock_track(fd, 0, 0)) {
+        char port[8];
+        tk_memcpy(port, ports[fd], 8);
+        if (m->msg_name && m->msg_namelen) { tk_memset(nets[fd].remote, 0, 28); tk_memcpy(nets[fd].remote, m->msg_name, m->msg_namelen < 28 ? m->msg_namelen : 28); }
+        emit_iov(REC_READ, fd, port, m->msg_iov, (int)m->msg_iovlen, r, CALL_RECVMSG);
+    }
+    *__errno_location() = e;
+    return r;
 }

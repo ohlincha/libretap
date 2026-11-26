@@ -42,8 +42,38 @@ enum {
     REC_SETUP,          /* a = in queue, b = out queue */
     REC_ERROR,          /* payload: UTF-8 text */
     REC_TERMIOS,        /* Linux: a = ok, c = call (1 tcsetattr, 2 ioctl TCSETS*); payload: tick_termios */
-    REC_MODEM           /* Linux: a = op (1 set, 2 bits on, 3 bits off), b = TIOCM_* bits, c = ok */
+    REC_MODEM,          /* Linux: a = op (1 set, 2 bits on, 3 bits off), b = TIOCM_* bits, c = ok */
+    REC_NET_OPEN,       /* a = ok, b = error, c = call; payload: tick_net */
+    REC_NET_SEND,       /* a = bytes asked to send, b = bytes sent (~0 pending), c = call; payload: tick_net + data */
+    REC_NET_RECV,       /* a = bytes asked for, c = call; payload: tick_net + data */
+    REC_NET_CLOSE,      /* c = call; payload: tick_net */
+    REC_USB_CTRL,       /* a = ok, b = bytes transferred, c = call; payload: 8-byte SETUP packet + data */
+    REC_USB_XFER        /* a = ok, b = endpoint (bit 7 = in), c = call; payload: data */
 };
+
+/* a socket as the hooks see it: sockaddr_in / sockaddr_in6 bytes (the same
+ * layout on Windows and Linux), zero when unknown */
+typedef struct {
+    u16 proto;          /* 6 TCP, 17 UDP */
+    u16 pad;
+    u8 local[28];
+    u8 remote[28];
+} tick_net;
+
+/* kinds Tick may tell the hooks to leave out: ring_hdr.pad[2] bits */
+#define KIND_SERIAL 1
+#define KIND_NET    2
+#define KIND_USB    4
+
+/* rec.c "call" numbers (names: ring_call_name) */
+enum {
+    CALL_READ = 1, CALL_WRITE, CALL_GETOVERLAPPED, CALL_READ_LATE, CALL_TRANSMITCHAR, CALL_READV, CALL_WRITEV,
+    CALL_CONNECT = 9, CALL_SEND, CALL_RECV, CALL_SENDTO, CALL_RECVFROM, CALL_WSASEND, CALL_WSARECV, CALL_WSASENDTO,
+    CALL_WSARECVFROM, CALL_WSAGETOVERLAPPED, CALL_SENDMSG, CALL_RECVMSG, CALL_ACCEPT, CALL_CLOSESOCKET,
+    CALL_WINUSB_CONTROL = 30, CALL_WINUSB_READ, CALL_WINUSB_WRITE, CALL_HID_GETFEATURE, CALL_HID_SETFEATURE,
+    CALL_HID_GETINPUT, CALL_HID_SETOUTPUT, CALL_USBFS_CONTROL, CALL_USBFS_BULK, CALL_USBFS_SUBMIT, CALL_USBFS_REAP
+};
+const char *ring_call_name(u32 call, int posix);
 
 /* Linux port settings as Tick records them (independent of libc's struct termios) */
 typedef struct {

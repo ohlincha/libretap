@@ -174,6 +174,24 @@ Tick session details (Tick 0.2; `recorder` is `"Tick 0.2.0"`, or `"TickScreen 0.
 - `call` events: `PurgeComm` (`flags`, hex), `SetupComm` (`in_queue`, `out_queue`), `DeviceIoControl` on a COM handle.
 - `status`/`error` texts tell when Tick started the program, when its listener became active, when the program
   ended (with exit code), and when listener records were lost because Tick could not keep up.
+- Network (Tick 0.4, `api-net`): one source `net` per program (`"process"`). Events carry `conn` (a connection id
+  like `n3`, one per socket), `proto` (`tcp`/`udp`), `local` and `remote` (`"192.168.0.20:5000"`,
+  `"[fe80:0:0:0:0:0:0:1]:5000"`): `open` (`call` `connect` or `accept`, `ok`, `error` = system error number),
+  `data` (`dir` `out`/`in`, `hex`, `n`, `call` = `send`, `recv`, `sendto`, `recvfrom`, `WSASend`, `WSARecv`,
+  `WSASendTo`, `WSARecvFrom`, `sendmsg`, `recvmsg`, `read`, `write`; `req` for receives; `sent` if fewer bytes went
+  out, `pending: true` for overlapped sends still in progress; for UDP `remote` is the datagram's peer), `close`.
+  Example: `{"t":…,"kind":"data","src":"net","conn":"n1","proto":"tcp","local":"127.0.0.1:2920","remote":
+  "127.0.0.1:5800","dir":"out","hex":"2a49444e3f0d","call":"send","n":6}`.
+- USB and other devices (Tick 0.4, `api-usb`): one source per device handle path, with `device` (the path); ids like
+  `usb-vid_0403-pid_6001` (Windows `\\?\usb#vid_…&pid_…#…`), `hid-vid_046d-pid_c52b-mi_02`, `dev-<driver name>`
+  (Windows `\\.\Name` vendor drivers), `usb-001-004` (Linux `/dev/bus/usb/001/004`), `hidraw0`, `usbtmc0`.
+  `open`/`close`; `data` from ReadFile/WriteFile (`read`/`write`); pipe/bulk/interrupt transfers as `data` with
+  `endpoint` (`"0x81"`; bit 7 = in) and `call` (`WinUsb_ReadPipe`, `WinUsb_WritePipe`, `ioctl USBDEVFS_BULK`,
+  `ioctl USBDEVFS_SUBMITURB` for OUT, `ioctl USBDEVFS_REAPURB` for IN); HID reports as `data` with `report`
+  (`feature`/`input`/`output`, `call` `HidD_…`; the first byte is the report id); control transfers as `data` with
+  `transfer: "control"`, `setup` (8 bytes hex), `request_type`, `request`, `value`, `index`, `length` and the data
+  stage in `hex`; `ok: false` when the call failed (then `hex` of an IN transfer is empty); other device ioctls as
+  `call` events (`DeviceIoControl` / `ioctl`, `code`, `in`, `out`).
 - Tick for Linux (0.3) writes the same format. `os` is like `"Linux 6.12.1 x86_64"`. Its `api-serial` sources are
   named after the device (`/dev/ttyUSB0` -> id `ttyusb0`, `/dev/pts/3` -> `pts3`, a path outside /dev -> its file name)
   and carry `device` (the path). `data` calls are `read`, `write`, `readv`, `writev`. `config` events come from

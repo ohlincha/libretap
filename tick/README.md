@@ -5,10 +5,12 @@ software and records what happens there into a session folder that LibreTap open
 
 - **the screen**: a screenshot every 0.5 s, of which only the parts that changed are stored (PNG); nothing is
   stored while the screen stands still, so an hour usually takes a few MB;
-- **what the vendor program does on its ports** (if you start the program from Tick): today its serial (COM) ports:
-  port settings, every byte written and read, with the time. There is nothing to choose: Tick records whatever the
-  program uses and says in plain words what it found ("VENDOR.EXE opened COM1: 9600 baud, 8N1, hardware handshake
-  (RTS/CTS)"). USB and network calls will be recorded the same way when they are added;
+- **what the vendor program does on its ports** (if you start the program from Tick): serial (COM) ports with their
+  settings, network connections (TCP/UDP: who it talks to and every byte), and USB/HID/vendor-driver devices
+  (transfers, reports, control requests, device I/O controls), with the time. There is nothing to choose: Tick
+  records whatever the program uses and says in plain words what it found ("VENDOR.EXE opened COM1: 9600 baud, 8N1,
+  hardware handshake (RTS/CTS)", "VENDOR.EXE connected to 192.168.0.20:5000 (TCP)", "VENDOR.EXE opened USB device
+  VID 0403 PID 6001"). *Advanced* can leave a kind out;
 - **marks** (with a note) and **sync** presses, and the title of the active window.
 
 ![Tick recording (under Wine)](docs/tick-window.png)
@@ -73,14 +75,19 @@ options: --dir DIR  --interval MS  --full-every N  --no-screen  --no-titles  --s
   window manager (`_NET_ACTIVE_WINDOW`).
 - Serial listener: `tick run` starts the program with `LD_PRELOAD=libtickhook.so` (carried inside `tick`, written
   to `<session>/tick/`, or `$XDG_RUNTIME_DIR`/`/tmp` if the session folder is on a `noexec` mount). The library
-  defines `open`/`openat`/`read`/`write`/`readv`/`writev`/`ioctl`/`tcsetattr`/`tcflush`/`tcsendbreak`/`close`
-  (+ `_FORTIFY_SOURCE` variants), does the real work as raw system calls and records calls on terminal devices
-  (serial ports, USB adapters, pseudo-terminals) into the same lock-free ring as on Windows, in `/dev/shm`.
+  defines `open`/`openat`/`read`/`write`/`readv`/`writev`/`ioctl`/`tcsetattr`/`tcflush`/`tcsendbreak`/`close`,
+  `connect`/`accept`/`accept4`/`send`/`recv`/`sendto`/`recvfrom`/`sendmsg`/`recvmsg` (+ `_FORTIFY_SOURCE`
+  variants), does the real work as raw system calls and records calls on terminal devices (serial ports, USB
+  adapters, pseudo-terminals), TCP/UDP sockets (not Unix sockets such as X11 or D-Bus), and USB devices
+  (`/dev/bus/usb/*` usbfs control/bulk/URB transfers as used by libusb, `/dev/hidraw*`, `/dev/usbtmc*`,
+  `/dev/usb/*`) into the same lock-free ring as on Windows, in `/dev/shm`. Options `--no-serial`, `--no-net`,
+  `--no-usb` leave a kind out.
   Programs the vendor program starts are listened to as well. It needs only `getenv` and `__errno_location` from
   libc (any glibc since 2.2.5, or musl). The status line says in words what was found ("PROGRAM opened
   /dev/ttyUSB0: 9600 baud, 8N1, no handshake"). The program runs in its own process group with its terminal
   output in `<session>/tick/program-output.log` (when the terminal UI is used).
-- Limits: statically linked and setuid programs ignore `LD_PRELOAD` (they run normally, unrecorded); 32-bit
+- Limits: DNS lookups made inside libc and other libc-internal socket use are not seen (the program's own calls
+  are); statically linked and setuid programs ignore `LD_PRELOAD` (they run normally, unrecorded); 32-bit
   programs cannot load the 64-bit library (same); serial I/O through stdio (`fopen`/`fprintf` on the port) or
   io_uring is not seen; no attaching to a running program. Runs on x86-64 Linux with kernel 3.2 or later; no
   32-bit (i686) build yet (needs a 32-bit libc to link against).
@@ -118,7 +125,12 @@ options: --dir DIR  --interval MS  --full-every N  --no-screen  --no-titles  --s
   The DLL patches the import tables of the program's modules (and hooks `GetProcAddress`/`LoadLibrary*` for late
   binding) for `CreateFileA/W`, `ReadFile`, `WriteFile`, `GetOverlappedResult`, `DeviceIoControl`,
   `SetCommState`, `SetCommTimeouts`, `EscapeCommFunction`, `SetCommBreak`, `ClearCommBreak`, `PurgeComm`,
-  `SetupComm`, `TransmitCommChar`, `CloseHandle`. Each hook calls the real function first and keeps its result and
+  `SetupComm`, `TransmitCommChar`, `CloseHandle`; network: Winsock `connect`, `accept`, `send`, `recv`,
+  `sendto`, `recvfrom`, `WSASend`, `WSARecv`, `WSASendTo`, `WSARecvFrom` (overlapped receives completed through
+  `WSAGetOverlappedResult`/`GetOverlappedResult`), `closesocket` (wsock32.dll programs too: its functions forward to
+  ws2_32 on NT); USB: device handles opened with `CreateFile` on `\\?\usb#…`, `\\?\hid#…` or `\\.\<driver>` paths
+  (ReadFile/WriteFile/DeviceIoControl on them), `HidD_Get/SetFeature`, `HidD_GetInputReport`,
+  `HidD_SetOutputReport`, `WinUsb_Initialize/ControlTransfer/ReadPipe/WritePipe/Free`. Each hook calls the real function first and keeps its result and
   error code; it then puts a record into a 1 MB lock-free ring in shared memory (`src/ring.c`) and never waits:
   if the ring is full the record is dropped and counted. Tick reads the ring every 25 ms. When Tick stops or
   closes, the hooks pass calls straight through. Network, USB and file hooks are meant to be added as more lines
@@ -140,6 +152,8 @@ make tools-test   # test helpers for Wine runs: tickctl.exe, fakevendor.exe, fak
 WINE=/path/to/wine tests/wine-test.sh win2k /tmp/tickwine     # end-to-end under Wine + Xvfb
 WINE=/path/to/wine tests/wine-safety.sh win2k /tmp/tickwine   # worst cases (kill Tick, kill program, ...)
 WINE=/path/to/wine tests/wine-test64.sh win7 /tmp/tickwine    # 64-bit program, TickScreen, program-only capture
+WINE=/path/to/wine tests/wine-test-netusb.sh win7 /tmp/tickwine  # network + device listener, 32 and 64 bit
+make test-usb     # USB decoding without hardware (native)
 ```
 
 Needs the x86_64 compiler of the same toolchain for the 64-bit parts. `tools/check-imports.sh` fails if Tick.exe,
@@ -147,6 +161,15 @@ TickScreen.exe or TickHook.dll imports a function that is not in
 `tools/win95-imports.txt` (functions present in both Windows 95 and 2000) or if the PE version is above 4.0.
 
 ## Tested and untested
+
+Tested (2026-11-26), network and USB (Tick 0.4): under Wine (Windows 7 mode) 32- and 64-bit test programs talking
+TCP and UDP to a fake network instrument on 127.0.0.1 (connect, send, recv, WSASend, overlapped WSARecv, sendto,
+recvfrom, closesocket all recorded), and using a device handle (`\\.\NUL`: WriteFile, DeviceIoControl, HidD_SetFeature,
+HidD_GetFeature recorded); natively on Linux the same network test (connect, send, recv, write, read, sendmsg,
+recvmsg, sendto, recv); USB decoding without hardware (`make test-usb`: usbfs control/bulk/URB records and
+Windows WinUSB/HID records through the converter). **Not tested**: any real USB device (WinUSB under Wine has no
+`WinUsb_Initialize`; usbfs needs a device), IPv6, overlapped I/O with completion routines or I/O completion ports
+(not recorded), 9x Winsock (wsock32 without ws2_32).
 
 Tested (2026-11-26): Tick for Linux natively under Xvfb (terminal UI in xterm with xclock running, `tick run`
 with a fake vendor program on a pseudo-terminal, control socket, kill -9 of tick / of the program, session folder

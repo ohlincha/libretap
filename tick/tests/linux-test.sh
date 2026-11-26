@@ -86,3 +86,9 @@ sleep 10
 echo "program after tick quit: $(cat "$S/vendor.log")"
 for d in "$S"/C4/*/; do python3 -I "$here/tests/check_session.py" "$d"; grep -E 'stopped listening' "$d/events.jsonl" | cut -c1-140; done
 kill $inst 2>/dev/null || true
+
+echo "== D: network listener (TCP + UDP to a fake network instrument)"
+python3 -I "$here/tests/fake_net_instrument.py" 5950 30 > "$S/netinst.log" 2>&1 &
+sleep 1
+"$T" run --no-tui --no-screen --until-exit --dir "$S/D" --control "$S/d.sock" -- "$here/build/linux/fakedevices_linux" 5950
+for d in "$S"/D/*/; do python3 -I "$here/tests/check_session.py" "$d"; grep -c '"src":"net"' "$d/events.jsonl"; done

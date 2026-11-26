@@ -44,7 +44,29 @@ static void usage(void)
          "options: --dir DIR (sessions folder), --interval MS (500), --full-every N (60),\n"
          "         --no-screen, --no-titles, --start (record at once), --no-tui (no terminal UI),\n"
          "         --until-exit (with run: stop and quit when the program ends),\n"
+         "         --no-serial, --no-net, --no-usb (leave a kind out; by default all the program uses is recorded),\n"
          "         --control PATH (control socket; default $XDG_RUNTIME_DIR/tick.sock or /tmp/tick-UID.sock)");
+}
+
+/* sockaddr for a control socket path; paths longer than sun_path (108 bytes) go
+ * through /proc/self/fd/N/name with N an O_PATH handle of the folder */
+static int ctl_addr(struct sockaddr_un *a, const char *path, int *dirfd)
+{
+    memset(a, 0, sizeof *a);
+    a->sun_family = AF_UNIX;
+    *dirfd = -1;
+    if (strlen(path) < sizeof a->sun_path) { memcpy(a->sun_path, path, strlen(path) + 1); return 1; }
+    {
+        char dir[TICK_PATH];
+        const char *slash = strrchr(path, '/');
+        if (!slash) return 0;
+        snprintf(dir, sizeof dir, "%.*s", (int)(slash - path), path);
+        *dirfd = open(dir[0] ? dir : "/", O_PATH | O_DIRECTORY | O_CLOEXEC);
+        if (*dirfd < 0) return 0;
+        if ((size_t)snprintf(a->sun_path, sizeof a->sun_path, "/proc/self/fd/%d/%s", *dirfd, slash + 1) >= sizeof a->sun_path)
+            return 0;
+    }
+    return 1;
 }
 
 static void default_ctl_path(char *out, u32 cap)
@@ -225,7 +247,7 @@ static void draw(void)
             snprintf(first, sizeof first, "%.*s", nl ? (int)(nl - ls) : (int)strlen(ls), ls);
             PUT("  %s\033[K\n", fit(first, line, sizeof line, 2));
             PUT("  %s\033[K\n", nl ? fit(nl + 1, line, sizeof line, 2) : "");
-        } else PUT("  Serial port too? Start the program with: tick run PROGRAM (recommended)\033[K\n\033[K\n");
+        } else PUT("  Ports too? Start the program with: tick run PROGRAM (recommended)\033[K\n\033[K\n");
     }
     if (note_mode) PUT("\n  Note for mark (Enter = mark, Esc = cancel): %s_\033[K\n", note);
     else PUT("\n  [s] %s   [m] mark with note   [y] sync   [q] quit\033[K\n", rec ? "stop" : "start");
@@ -257,17 +279,16 @@ static void key(int c)
 static int ctl_listen(void)
 {
     struct sockaddr_un a;
-    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    int dfd, fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (fd < 0) return -1;
-    memset(&a, 0, sizeof a);
-    a.sun_family = AF_UNIX;
-    snprintf(a.sun_path, sizeof a.sun_path, "%s", ctl_path);
+    if (!ctl_addr(&a, ctl_path, &dfd)) { close(fd); return -1; }
     {   /* a stale socket of a Tick that did not exit cleanly */
         int t = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
         if (t >= 0 && connect(t, (struct sockaddr *)&a, sizeof a) < 0) unlink(ctl_path);
         if (t >= 0) close(t);
     }
-    if (bind(fd, (struct sockaddr *)&a, sizeof a) < 0 || listen(fd, 4) < 0) { close(fd); return -1; }
+    if (bind(fd, (struct sockaddr *)&a, sizeof a) < 0 || listen(fd, 4) < 0) { close(fd); if (dfd >= 0) close(dfd); return -1; }
+    if (dfd >= 0) close(dfd);
     chmod(ctl_path, 0600);
     return fd;
 }
@@ -328,10 +349,13 @@ static int ctl_client(int argc, char **argv)
     for (i = 0; i < argc; i++) o += (size_t)snprintf(cmd + o, sizeof cmd - o, "%s%s", i ? " " : "", argv[i]);
     if (!argc) { copy_str(cmd, "status", sizeof cmd); }
     fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    memset(&a, 0, sizeof a);
-    a.sun_family = AF_UNIX;
-    snprintf(a.sun_path, sizeof a.sun_path, "%s", ctl_path);
-    if (fd < 0 || connect(fd, (struct sockaddr *)&a, sizeof a) < 0) {
+    {
+        int dfd;
+        if (!ctl_addr(&a, ctl_path, &dfd)) { fprintf(stderr, "tick ctl: bad path %s\n", ctl_path); return 1; }
+        if (fd >= 0 && connect(fd, (struct sockaddr *)&a, sizeof a) < 0) { close(fd); fd = -1; }
+        if (dfd >= 0) close(dfd);
+    }
+    if (fd < 0) {
         fprintf(stderr, "tick ctl: no running tick at %s\n", ctl_path);
         return 1;
     }
@@ -354,6 +378,7 @@ int main(int argc, char **argv)
 
     g_cfg.interval_ms = 500; g_cfg.full_every = 60; g_cfg.tile = 32;
     g_cfg.cursor = 0; g_cfg.titles = 1; g_cfg.mask_self = 1;
+    g_cfg.rec_serial = g_cfg.rec_net = g_cfg.rec_usb = 1;
     n = readlink("/proc/self/exe", g_exe_dir, sizeof g_exe_dir - 1);
     if (n > 0) {
         g_exe_dir[n] = 0;
@@ -379,6 +404,9 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--start")) start = 1;
         else if (!strcmp(a, "--no-tui")) no_tui = 1;
         else if (!strcmp(a, "--until-exit")) until_exit = 1;
+        else if (!strcmp(a, "--no-serial")) g_cfg.rec_serial = 0;
+        else if (!strcmp(a, "--no-net")) g_cfg.rec_net = 0;
+        else if (!strcmp(a, "--no-usb")) g_cfg.rec_usb = 0;
         else if (!strcmp(a, "-h") || !strcmp(a, "--help")) { usage(); return 0; }
         else if (!strcmp(a, "--")) { i++; break; }
         else if (a[0] == '-') { fprintf(stderr, "tick: unknown option %s\n", a); usage(); return 2; }

@@ -59,6 +59,19 @@ int strcmp(const char *a, const char *b)
     return (int)(u8)*a - (int)(u8)*b;
 }
 
+int strncmp(const char *a, const char *b, size_t n)
+{
+    while (n && *a && *a == *b) { a++; b++; n--; }
+    return n ? (int)(u8)*a - (int)(u8)*b : 0;
+}
+
+char *strstr(const char *h, const char *n)
+{
+    size_t k = strlen(n);
+    for (; *h; h++) if (!strncmp(h, n, k)) return (char *)h;
+    return k ? 0 : (char *)h;
+}
+
 void *rt_alloc(u32 n)
 {
     return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, n ? n : 1);

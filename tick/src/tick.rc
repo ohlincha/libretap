@@ -30,7 +30,7 @@ BEGIN
   END
 END
 
-IDD_ADV DIALOG 0, 0, 260, 262
+IDD_ADV DIALOG 0, 0, 260, 278
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Tick - Advanced"
 FONT 8, "MS Sans Serif"
@@ -48,13 +48,17 @@ BEGIN
   AUTOCHECKBOX "Screenshots show only the vendor program's windows (rest black)", IDC_PROGONLY, 8, 90, 244, 10
   PUSHBUTTON "Pick the program's window...", IDC_PICKWIN, 20, 102, 120, 14
   AUTOCHECKBOX "Copy the started program's settings files (*.ini, *.cfg...)", IDC_COPYSET, 8, 122, 240, 10
-  LTEXT "Sessions folder (empty: TickSessions next to Tick.exe):", -1, 8, 138, 240, 8
-  EDITTEXT IDC_DIR, 8, 148, 244, 12, ES_AUTOHSCROLL
-  PUSHBUTTON "Open sessions folder", IDC_OPENDIR, 8, 166, 100, 14
-  PUSHBUTTON "Listen to a running program...", IDC_ATTACH, 120, 166, 132, 14
-  LTEXT "", IDC_INFO, 8, 188, 244, 48
-  DEFPUSHBUTTON "OK", IDOK, 146, 242, 50, 14
-  PUSHBUTTON "Cancel", IDCANCEL, 202, 242, 50, 14
+  LTEXT "Record what the program uses:", -1, 8, 136, 110, 8
+  AUTOCHECKBOX "serial ports", IDC_RECSER, 116, 135, 50, 10
+  AUTOCHECKBOX "network", IDC_RECNET, 168, 135, 40, 10
+  AUTOCHECKBOX "USB", IDC_RECUSB, 212, 135, 40, 10
+  LTEXT "Sessions folder (empty: TickSessions next to Tick.exe):", -1, 8, 154, 240, 8
+  EDITTEXT IDC_DIR, 8, 164, 244, 12, ES_AUTOHSCROLL
+  PUSHBUTTON "Open sessions folder", IDC_OPENDIR, 8, 182, 100, 14
+  PUSHBUTTON "Listen to a running program...", IDC_ATTACH, 120, 182, 132, 14
+  LTEXT "", IDC_INFO, 8, 204, 244, 48
+  DEFPUSHBUTTON "OK", IDOK, 146, 258, 50, 14
+  PUSHBUTTON "Cancel", IDCANCEL, 202, 258, 50, 14
 END
 
 

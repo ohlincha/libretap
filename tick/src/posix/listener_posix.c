@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #include "tickx.h"
 #include "../ring.h"
+#include "../recev.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -36,6 +37,7 @@ static u8 *recbuf;
 static struct { char id[8]; char path[256]; char desc[400]; } ports[32];
 static int nports;
 static int last_port = -1;
+static recev_counts rc;
 
 int listener_running(void) { return running; }
 int listener_pid(void) { return running ? (int)child : 0; }
@@ -44,11 +46,15 @@ const char *listener_status(void) { return status_text; }
 static void set_status(void)
 {
     if (running) {
+        u32 o = bytes_out + rc.net_out + rc.usb_out, i = bytes_in + rc.net_in + rc.usb_in;
+        const char *tail = session_active() ? "" : " (paused, not recording)";
         if (last_port >= 0)
-            snprintf(status_text, sizeof status_text, "%s opened %s\nListening: %u bytes sent, %u received%s", prog,
-                     ports[last_port].desc[0] ? ports[last_port].desc : ports[last_port].path, bytes_out, bytes_in,
-                     session_active() ? "" : " (paused, not recording)");
-        else snprintf(status_text, sizeof status_text, "%s: listening, no serial port opened yet", prog);
+            snprintf(status_text, sizeof status_text, "%s opened %s%s\nListening: %u bytes sent, %u received%s", prog,
+                     ports[last_port].desc[0] ? ports[last_port].desc : ports[last_port].path,
+                     rc.found[0] ? "; also network/USB" : "", o, i, tail);
+        else if (rc.found[0])
+            snprintf(status_text, sizeof status_text, "%s\nListening: %u bytes sent, %u received%s", rc.found, o, i, tail);
+        else snprintf(status_text, sizeof status_text, "%s: listening, nothing opened yet (serial, network, USB)", prog);
     } else if (prog[0]) snprintf(status_text, sizeof status_text, "%s has ended.", prog);
     else status_text[0] = 0;
 }
@@ -113,6 +119,7 @@ static void record_to_event(const ring_rec *r, const u8 *p)
     char id[32], rp[8];
     int pi;
     u64 t = (r->flags & RECF_UNIXUS) ? r->t : clock_now_us();
+    if (recev_net(r, p, t, 1, prog, &rc) || recev_usb(r, p, t, 1, prog, &rc)) return;
     memcpy(rp, r->port, 8);
     rp[7] = 0;
     sb_init(&b, 256 + r->dlen * 2);
@@ -386,6 +393,9 @@ static int make_ring(void)
     ring_init(ring, RING_DATA);
     ring->tick_pid = (u32)getpid();
     ring->pad[0] = 1;
+    ring->pad[2] = (g_cfg.rec_serial ? 0 : KIND_SERIAL) | (g_cfg.rec_net ? 0 : KIND_NET) | (g_cfg.rec_usb ? 0 : KIND_USB);
+    recev_reset();
+    memset(&rc, 0, sizeof rc);
     ring->active = session_active() ? 1 : 0;
     last_drops = bytes_in = bytes_out = 0;
     nports = 0;
@@ -454,7 +464,7 @@ int listener_run(char **argv, int quiet_output, char *err, u32 errcap)
         size_t o = (size_t)snprintf(m, sizeof m, "Started");
         for (i = 0; argv[i] && o < sizeof m - 2; i++) o += (size_t)snprintf(m + o, sizeof m - o, " %s", argv[i]);
         snprintf(m + (o < sizeof m ? o : sizeof m - 1), sizeof m - (o < sizeof m ? o : sizeof m - 1),
-                 " (process %d) with Tick's serial listener", (int)child);
+                 " (process %d) with Tick's listener (serial, network, USB)", (int)child);
         ev_status("status", m);
     }
     stop_reader = 0;

@@ -93,3 +93,42 @@ void ring_skip(ring_hdr *h)
     h->tail = t + len;
     __sync_fetch_and_add(&h->drops, 1);
 }
+
+const char *ring_call_name(u32 c, int posix)
+{
+    switch (c) {
+    case CALL_READ: return posix ? "read" : "ReadFile";
+    case CALL_WRITE: return posix ? "write" : "WriteFile";
+    case CALL_GETOVERLAPPED: return "GetOverlappedResult";
+    case CALL_READ_LATE: return "ReadFile (overlapped, seen late)";
+    case CALL_TRANSMITCHAR: return "TransmitCommChar";
+    case CALL_READV: return "readv";
+    case CALL_WRITEV: return "writev";
+    case CALL_CONNECT: return "connect";
+    case CALL_SEND: return "send";
+    case CALL_RECV: return "recv";
+    case CALL_SENDTO: return "sendto";
+    case CALL_RECVFROM: return "recvfrom";
+    case CALL_WSASEND: return "WSASend";
+    case CALL_WSARECV: return "WSARecv";
+    case CALL_WSASENDTO: return "WSASendTo";
+    case CALL_WSARECVFROM: return "WSARecvFrom";
+    case CALL_WSAGETOVERLAPPED: return "WSAGetOverlappedResult";
+    case CALL_SENDMSG: return "sendmsg";
+    case CALL_RECVMSG: return "recvmsg";
+    case CALL_ACCEPT: return "accept";
+    case CALL_CLOSESOCKET: return posix ? "close" : "closesocket";
+    case CALL_WINUSB_CONTROL: return "WinUsb_ControlTransfer";
+    case CALL_WINUSB_READ: return "WinUsb_ReadPipe";
+    case CALL_WINUSB_WRITE: return "WinUsb_WritePipe";
+    case CALL_HID_GETFEATURE: return "HidD_GetFeature";
+    case CALL_HID_SETFEATURE: return "HidD_SetFeature";
+    case CALL_HID_GETINPUT: return "HidD_GetInputReport";
+    case CALL_HID_SETOUTPUT: return "HidD_SetOutputReport";
+    case CALL_USBFS_CONTROL: return "ioctl USBDEVFS_CONTROL";
+    case CALL_USBFS_BULK: return "ioctl USBDEVFS_BULK";
+    case CALL_USBFS_SUBMIT: return "ioctl USBDEVFS_SUBMITURB";
+    case CALL_USBFS_REAP: return "ioctl USBDEVFS_REAPURB";
+    }
+    return "?";
+}

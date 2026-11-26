@@ -29,6 +29,7 @@ const char *listener_status(void) { return ""; }
 
 #include "ring.h"
 #include "resource.h"
+#include "recev.h"
 
 static CRITICAL_SECTION lcs;
 static int lcs_ready;
@@ -40,7 +41,9 @@ static DWORD target_pid;
 static char status_text[200];
 static u32 last_drops, bytes_in, bytes_out;
 static char ports_seen[64];
-static char port_desc[120];             /* "COM1: 9600 baud, 8N1, hardware handshake" (last settings seen) */
+static char port_desc[120];
+static recev_counts rc;
+static char prog_utf8[MAX_PATH * 2];             /* "COM1: 9600 baud, 8N1, hardware handshake" (last settings seen) */
 static u8 *recbuf;
 
 static void lock(void)
@@ -58,16 +61,22 @@ static void set_status(void)
     sbuf b;
     sb_init(&b, 200);
     if (running) {
-        sb_str(&b, prog_name);
-        if (ports_seen[0]) {
-            sb_str(&b, " opened ");
-            sb_str(&b, port_desc[0] ? port_desc : ports_seen);
+        if (ports_seen[0] || rc.found[0]) {
+            if (ports_seen[0]) {
+                sb_str(&b, prog_name);
+                sb_str(&b, " opened ");
+                sb_str(&b, port_desc[0] ? port_desc : ports_seen);
+                if (rc.found[0]) sb_str(&b, "; also network/USB");
+            } else sb_str(&b, rc.found);
             sb_str(&b, "\r\nListening: ");
-            sb_u32(&b, bytes_out);
+            sb_u32(&b, bytes_out + rc.net_out + rc.usb_out);
             sb_str(&b, " bytes sent, ");
-            sb_u32(&b, bytes_in);
+            sb_u32(&b, bytes_in + rc.net_in + rc.usb_in);
             sb_str(&b, " received");
-        } else sb_str(&b, ": listening, no port opened yet");
+        } else {
+            sb_str(&b, prog_name);
+            sb_str(&b, ": listening, nothing opened yet (serial, network, USB)");
+        }
         if (!session_active()) sb_str(&b, " - paused, not recording");
     } else if (prog_name[0]) {
         sb_str(&b, prog_name);
@@ -145,6 +154,7 @@ static void record_to_event(const ring_rec *r, const u8 *p)
     sbuf b;
     char id[16];
     u64 t = (r->flags & RECF_QPC) ? clock_qpc_to_us(r->t) : clock_ft_to_us(r->t);
+    if (recev_net(r, p, t, 0, prog_utf8, &rc) || recev_usb(r, p, t, 0, prog_utf8, &rc)) return;
     sb_init(&b, 256 + r->dlen * 2);
     if (r->type == REC_TEXT || r->type == REC_ERROR) {
         ev_begin(&b, t, r->type == REC_TEXT ? "status" : "error");
@@ -533,6 +543,16 @@ static int make_ring(DWORD pid, int mode)
     ring->target_pid = pid;
     target_pid = pid;
     ring->pad[0] = (u32)mode;             /* 1 started by Tick, 2 attached */
+    ring->pad[2] = (g_cfg.rec_serial ? 0 : KIND_SERIAL) | (g_cfg.rec_net ? 0 : KIND_NET) | (g_cfg.rec_usb ? 0 : KIND_USB);
+    recev_reset();
+    memset(&rc, 0, sizeof rc);
+    {
+        sbuf u;
+        sb_init(&u, 100);
+        ansi_to_utf8(&u, prog_name);
+        copy_str(prog_utf8, u.p ? u.p : "", sizeof prog_utf8);
+        sb_free(&u);
+    }
     ring->active = session_active() ? 1 : 0;
     last_drops = 0;
     bytes_in = bytes_out = 0;
@@ -729,7 +749,7 @@ started:
         sb_mem(&b, u.p, u.len);
         sb_str(&b, " (process ");
         sb_u32(&b, pi.dwProcessId);
-        sb_str(&b, x64 ? ", 64-bit) and listening to its serial ports" : ") and listening to its serial ports");
+        sb_str(&b, x64 ? ", 64-bit) and listening to its ports (serial, network, USB)" : ") and listening to its ports (serial, network, USB)");
         ev_status("status", b.p);
         sb_free(&b);
         sb_free(&u);

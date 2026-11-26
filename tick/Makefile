@@ -28,7 +28,7 @@ LDFLAGS := -nostdlib -mwindows -Wl,-e,_TickMain@0 $(OSVER) -Wl,--disable-dynamic
 LIBS := -lkernel32 -luser32 -lgdi32 -lcomdlg32
 DLLFLAGS := -shared -nostdlib -Wl,-e,_DllMain@12 -Wl,--kill-at $(OSVER) -s
 
-SRC := src/tick.c src/capture.c src/session.c src/plat_win.c src/clock.c src/launch.c src/png.c src/diff.c src/ring.c src/rt.c
+SRC := src/tick.c src/capture.c src/session.c src/plat_win.c src/clock.c src/launch.c src/recev.c src/png.c src/diff.c src/ring.c src/rt.c
 OBJ := $(SRC:src/%.c=$(B)/%.o) $(B)/tick.res.o $(B)/hook.res.o
 SOBJ := $(SRC:src/%.c=$(B)/screen/%.o) $(B)/screen/tick.res.o
 CFLAGS64 := -O2 -ffreestanding -fno-builtin -fno-stack-protector -mno-stack-arg-probe \
@@ -89,7 +89,11 @@ clean:
 	rm -rf $(B)
 
 # test helpers for Wine runs (use the normal mingw C runtime; not shipped)
-tools-test: $(B)/tickctl.exe $(B)/fakevendor.exe $(B)/fakevendor64.exe
+tools-test: $(B)/tickctl.exe $(B)/fakevendor.exe $(B)/fakevendor64.exe $(B)/fakedevices.exe $(B)/fakedevices64.exe
+$(B)/fakedevices.exe: tests/fakedevices.c | $(B)
+	$(CC) -O2 -o $@ $< -lws2_32
+$(B)/fakedevices64.exe: tests/fakedevices.c | $(B)
+	$(CC64) -O2 -o $@ $< -lws2_32
 $(B)/fakevendor64.exe: tests/fakevendor.c | $(B)
 	$(CC64) -O2 -o $@ $<
 $(B)/tickctl.exe: tests/tickctl.c | $(B)
@@ -101,7 +105,7 @@ $(B)/fakevendor.exe: tests/fakevendor.c | $(B)
 LCC ?= gcc
 LCFLAGS := -O2 -Wall -Wextra -Wno-unused-parameter -D_FILE_OFFSET_BITS=64
 LSRC := src/posix/tick_linux.c src/posix/capture_x11.c src/posix/x11.c src/posix/listener_posix.c \
-        src/posix/plat_posix.c src/posix/clock_posix.c src/session.c src/png.c src/diff.c src/ring.c src/rt.c
+        src/posix/plat_posix.c src/posix/clock_posix.c src/session.c src/recev.c src/png.c src/diff.c src/ring.c src/rt.c
 L := $(B)/linux
 
 linux: $(L)/tick
@@ -118,7 +122,17 @@ $(L)/tick: $(LSRC) src/*.h src/posix/*.h $(L)/hookso.c
 	$(LCC) $(LCFLAGS) -static -pthread -o $@ $(LSRC) $(L)/hookso.c
 	strip $@
 
+# USB decoding without USB hardware (Linux hook code + recev.c, native)
+test-usb: | $(B)
+	mkdir -p $(L)
+	$(LCC) -O1 -Wall -Wno-unused-function -fno-builtin -o $(L)/test_usb_decode tests/test_usb_decode.c src/recev.c src/rt.c
+	$(L)/test_usb_decode
+
 linux-check: $(L)/tick
 	sh tools/check-linux.sh $(L)/tick $(L)/libtickhook.so
 
-.PHONY: all check test clean tools-test linux linux-check
+linux-tools-test:
+	$(LCC) -O2 -o $(L)/fakevendor_linux tests/fakevendor_linux.c
+	$(LCC) -O2 -o $(L)/fakedevices_linux tests/fakedevices_linux.c
+
+.PHONY: all check test clean tools-test linux linux-check test-usb linux-tools-test

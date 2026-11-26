@@ -12,7 +12,7 @@
 #define PSEP "/"
 #endif
 
-#define TICK_VERSION "0.3.0"
+#define TICK_VERSION "0.4.0"
 #ifdef TICK_SCREEN_ONLY
 #define TICK_NAME    "TickScreen " TICK_VERSION
 #else
@@ -30,6 +30,7 @@ typedef struct {
     int topmost;            /* keep Tick above other windows */
     int program_only;       /* screenshots show only the vendor program's windows */
     int copy_settings;      /* copy the started program's settings files into files/ */
+    int rec_serial, rec_net, rec_usb;   /* kinds the listener records (all on by default) */
     char dir[TICK_PATH];     /* sessions folder; "" = TickSessions next to Tick.exe */
 } tick_cfg;
 
