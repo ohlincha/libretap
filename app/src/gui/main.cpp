@@ -9,7 +9,10 @@
 //   LIBRETAP_SHOT_ADD=folder               add that session (e.g. a Tick session) to the opened recording
 //   LIBRETAP_SHOT_TIME=seconds             move the timeline to that time after the start
 //   LIBRETAP_SHOT_SIZE=WxH                 window size
+//   LIBRETAP_SHOT_PROTOCOL=file.json       load a protocol description
+//   LIBRETAP_SHOT_VIEW=compare,A,B | exchanges | hints   open that analysis window (screenshot it)
 #include <QApplication>
+#include <QDialog>
 #include <QTimer>
 
 #include "core/util.h"
@@ -45,9 +48,18 @@ int main(int argc, char** argv) {
             w.resize(sz.section(QLatin1Char('x'), 0, 0).toInt(), sz.section(QLatin1Char('x'), 1, 1).toInt());
         w.show();
         splash.finish(&w);
-        if (args.contains(QStringLiteral("--demo"))) w.setDemo(true);
-        for (const QString& a : args.mid(1))
-            if (!a.startsWith(QLatin1String("--"))) w.openRecording(a);
+        const int demo = args.indexOf(QStringLiteral("--demo"));
+        const QString demoName = demo > 0 && demo + 1 < args.size() && !args[demo + 1].startsWith(QLatin1String("--")) ? args[demo + 1] : QString();
+        if (!demoName.isEmpty()) w.openDemo(demoName);        // LibreTap --demo cora: an example recording
+        else if (demo > 0) w.setDemo(true);                  // LibreTap --demo: the pretend instrument
+        for (int i = 1; i < args.size(); ++i)
+            if (!args[i].startsWith(QLatin1String("--")) && args[i] != demoName) w.openRecording(args[i]);
+        if (const QString pr = qEnvironmentVariable("LIBRETAP_SHOT_PROTOCOL"); !pr.isEmpty()) w.loadProtocol(pr);
+        if (const QString v = qEnvironmentVariable("LIBRETAP_SHOT_VIEW"); !v.isEmpty()) {   // testing: compare, exchanges, hints
+            if (v.startsWith(QLatin1String("compare"))) w.openCompare(v.section(QLatin1Char(','), 1, 1).toInt(), v.section(QLatin1Char(','), 2, 2).toInt());
+            else if (v == QLatin1String("exchanges")) w.showExchanges();
+            else if (v == QLatin1String("hints")) w.showHints();
+        }
         if (const QString add = qEnvironmentVariable("LIBRETAP_SHOT_ADD"); !add.isEmpty()) w.addSession(add);
     });
     const QString shot = qEnvironmentVariable("LIBRETAP_SHOT");
@@ -63,7 +75,10 @@ int main(int argc, char** argv) {
             if (qEnvironmentVariableIsSet("LIBRETAP_SHOT_TIME"))
                 w.setTimelineTime(w.project().start() + qEnvironmentVariable("LIBRETAP_SHOT_TIME").toDouble());
             QTimer::singleShot(300, &w, [&w, shot] {
-                w.grab().save(shot.section(QLatin1Char(','), 0, 0));
+                QWidget* target = &w;
+                for (QWidget* t : QApplication::topLevelWidgets())   // an analysis window on top of it
+                    if (qobject_cast<QDialog*>(t) && t->isVisible()) target = t;
+                target->grab().save(shot.section(QLatin1Char(','), 0, 0));
                 w.recorder().stop();
                 QApplication::quit();
             });

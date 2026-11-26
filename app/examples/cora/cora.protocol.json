@@ -1,0 +1,1756 @@
+{
+ "format": "libretap-protocol",
+ "version": 1,
+ "name": "Anton Paar Cora 5000 (BaySpec spectrometers, I/O board, laser driver, MCP2200)",
+ "notes": "From USB captures of the vendor software, 2026-11-20 (LibreRaman's PROTOCOL.md). Devices behind the instrument's own hub: BaySpec ba8c:1688 (two), Prolific 067b:2303 = I/O board (115200 8N1, LF, \"OK\"), Silicon Labs 10c4:ea60 = laser driver (19200 8N1, CR), Microchip 04d8:00df = MCP2200 GPIO over HID. SAFETY: IO L 09 switches the 532 nm laser on (when armed); laseron/current drive the 1064 nm laser. Verified on the instrument: exposure units, laser line 09, arming bits. Guessed: the roles of the other I/O lines, param2.",
+ "messages": [
+  {
+   "name": "BaySpec: read EEPROM",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0xA1"
+   },
+   "say": "Spectrometer: read 64 bytes of its EEPROM at offset {block}",
+   "device": "ba8c:1688",
+   "fields": [
+    {
+     "name": "block",
+     "from": "wIndex",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "BaySpec: reset",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0xA3"
+   },
+   "say": "Spectrometer: reset / initialise",
+   "device": "ba8c:1688"
+  },
+  {
+   "name": "BaySpec: set flag",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0xA4"
+   },
+   "say": "Spectrometer: set flag 0x3F0 to {value} (0 on spectrometer #1, 1 on #2)",
+   "device": "ba8c:1688",
+   "fields": [
+    {
+     "name": "value",
+     "from": "wValue"
+    }
+   ]
+  },
+  {
+   "name": "BaySpec: read flag",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0xA4"
+   },
+   "say": "Spectrometer: read flag {index}",
+   "device": "ba8c:1688",
+   "fields": [
+    {
+     "name": "index",
+     "from": "wIndex",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "BaySpec: read 0xA8",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0xA8"
+   },
+   "say": "Spectrometer: read 0xA8 at {index} (stalls on #1; perhaps a temperature)",
+   "device": "ba8c:1688",
+   "fields": [
+    {
+     "name": "index",
+     "from": "wIndex",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "BaySpec: 0xAD",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0xAD"
+   },
+   "say": "Spectrometer #2: command 0xAD at {index}",
+   "device": "ba8c:1688",
+   "fields": [
+    {
+     "name": "index",
+     "from": "wIndex",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "BaySpec: set exposure",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0xAE"
+   },
+   "say": "Spectrometer: exposure {exposure}, param2 {param2}",
+   "device": "ba8c:1688",
+   "fields": [
+    {
+     "name": "exposure",
+     "offset": 0,
+     "length": 4,
+     "type": "u32le",
+     "add": 1,
+     "scale": 1.6e-05,
+     "unit": "s"
+    },
+    {
+     "name": "param2",
+     "offset": 4,
+     "length": 4,
+     "type": "u32le"
+    }
+   ]
+  },
+  {
+   "name": "BaySpec: start exposure",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0xAA",
+    "wValue": "0xFFFF"
+   },
+   "say": "Spectrometer: START exposure",
+   "device": "ba8c:1688"
+  },
+  {
+   "name": "BaySpec: end exposure",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0xAA",
+    "wValue": "0x0000"
+   },
+   "say": "Spectrometer: end of exposure",
+   "device": "ba8c:1688"
+  },
+  {
+   "name": "BaySpec: spectrum",
+   "device": "ba8c:1688",
+   "ep": 2,
+   "dir": "from-instrument",
+   "hex": "*",
+   "say": "Spectrometer: frame of {pixels} bytes (big-endian 16-bit pixels, reverse order: pixel p = 2057 − index)",
+   "fields": [
+    {
+     "name": "pixels",
+     "offset": 0,
+     "length": 0,
+     "type": "hex",
+     "values": {}
+    }
+   ]
+  },
+  {
+   "name": "I/O: laser emission on",
+   "device": "067b:2303",
+   "dir": "to-instrument",
+   "text": "^IO L 09\\n$",
+   "say": "I/O board: line 09 low = LASER EMISSION ON (532 nm; only when armed)"
+  },
+  {
+   "name": "I/O: laser emission off",
+   "device": "067b:2303",
+   "dir": "to-instrument",
+   "text": "^IO H 09\\n$",
+   "say": "I/O board: line 09 high = laser emission off"
+  },
+  {
+   "name": "I/O: set line",
+   "device": "067b:2303",
+   "dir": "to-instrument",
+   "text": "^IO ([HL]) ([0-9a-fA-F]{2})\\n$",
+   "say": "I/O board: line {line} {level}",
+   "fields": [
+    {
+     "name": "level",
+     "group": 1,
+     "type": "text",
+     "values": {
+      "H": "high (off)",
+      "L": "low (on; power lines bring up a USB device)"
+     }
+    },
+    {
+     "name": "line",
+     "group": 2,
+     "type": "text",
+     "values": {
+      "0a": "0a (inner hub power)",
+      "0c": "0c (spectrometer #1 power)",
+      "0d": "0d (spectrometer #2 power)",
+      "07": "07 (laser driver power, 1064 nm)",
+      "08": "08 (532 nm laser supply?)",
+      "0b": "0b (1064/532 switching)",
+      "0e": "0e (beam path)",
+      "0f": "0f (beam path)"
+     }
+    }
+   ]
+  },
+  {
+   "name": "I/O: TEC enable",
+   "device": "067b:2303",
+   "dir": "to-instrument",
+   "text": "^TECE\\n$",
+   "say": "I/O board: TEC enable (TECE)"
+  },
+  {
+   "name": "I/O: VOL query",
+   "device": "067b:2303",
+   "dir": "to-instrument",
+   "text": "^VOL (\\d+)\\n$",
+   "say": "I/O board: read analogue input {ch} (polled every 2 s)",
+   "fields": [
+    {
+     "name": "ch",
+     "group": 1,
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "name": "I/O: USB",
+   "device": "067b:2303",
+   "dir": "to-instrument",
+   "text": "^USB\\n$",
+   "say": "I/O board: USB (first step of the vendor shutdown)"
+  },
+  {
+   "name": "I/O: OFF",
+   "device": "067b:2303",
+   "dir": "to-instrument",
+   "text": "^OFF\\n$",
+   "say": "I/O board: OFF (shuts the instrument down)"
+  },
+  {
+   "name": "I/O: OK",
+   "device": "067b:2303",
+   "dir": "from-instrument",
+   "text": "^OK\\n$",
+   "say": "I/O board: OK"
+  },
+  {
+   "name": "I/O: VOL reading",
+   "device": "067b:2303",
+   "dir": "from-instrument",
+   "text": "^VOL:([0-9.]+)\\n(OK\\n)?$",
+   "say": "I/O board: analogue reading {v}",
+   "fields": [
+    {
+     "name": "v",
+     "group": 1,
+     "type": "float"
+    }
+   ]
+  },
+  {
+   "name": "I/O: USB reply",
+   "device": "067b:2303",
+   "dir": "from-instrument",
+   "text": "^USB:(\\d+)\\n$",
+   "say": "I/O board: USB:{v}",
+   "fields": [
+    {
+     "name": "v",
+     "group": 1,
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "name": "Laser: revision?",
+   "device": "10c4:ea60",
+   "dir": "to-instrument",
+   "text": "^rev\\?\\r$",
+   "say": "Laser driver: firmware revision?"
+  },
+  {
+   "name": "Laser: revision",
+   "device": "10c4:ea60",
+   "dir": "from-instrument",
+   "text": "^Software Rev=(.*?)\\r?\\n?$",
+   "say": "Laser driver: firmware {rev}",
+   "fields": [
+    {
+     "name": "rev",
+     "group": 1,
+     "type": "text"
+    }
+   ]
+  },
+  {
+   "name": "Laser: TEC max",
+   "device": "10c4:ea60",
+   "dir": "to-instrument",
+   "text": "^tecmax ([0-9.]+)\\r$",
+   "say": "Laser driver: TEC maximum {v} A",
+   "fields": [
+    {
+     "name": "v",
+     "group": 1,
+     "type": "float"
+    }
+   ]
+  },
+  {
+   "name": "Laser: temperature",
+   "device": "10c4:ea60",
+   "dir": "to-instrument",
+   "text": "^temperature ([0-9.]+)\\r$",
+   "say": "Laser driver: temperature set point {v} °C",
+   "fields": [
+    {
+     "name": "v",
+     "group": 1,
+     "type": "float"
+    }
+   ]
+  },
+  {
+   "name": "Laser: on",
+   "device": "10c4:ea60",
+   "dir": "to-instrument",
+   "text": "^laseron\\r$",
+   "say": "Laser driver: LASER ON (1064 nm; power follows `current`)"
+  },
+  {
+   "name": "Laser: off",
+   "device": "10c4:ea60",
+   "dir": "to-instrument",
+   "text": "^laseroff\\r$",
+   "say": "Laser driver: laser off"
+  },
+  {
+   "name": "Laser: current",
+   "device": "10c4:ea60",
+   "dir": "to-instrument",
+   "text": "^current ([0-9.]+)\\r$",
+   "say": "Laser driver: current {a} A (1064 nm power: I = 0.2758 + 0.002209 × P[mW])",
+   "fields": [
+    {
+     "name": "a",
+     "group": 1,
+     "type": "float"
+    }
+   ]
+  },
+  {
+   "name": "Laser: empty line",
+   "device": "10c4:ea60",
+   "dir": "to-instrument",
+   "text": "^\\r$",
+   "say": "Laser driver: empty line (wake-up)"
+  },
+  {
+   "name": "Laser: line end",
+   "device": "10c4:ea60",
+   "dir": "from-instrument",
+   "text": "^\\r?\\n$",
+   "say": "Laser driver: end of line (acknowledge)"
+  },
+  {
+   "name": "MCP2200: READ_ALL",
+   "device": "04d8:00df",
+   "ep": 1,
+   "dir": "to-instrument",
+   "hex": "80 …",
+   "say": "MCP2200: read all (status poll)"
+  },
+  {
+   "name": "MCP2200: status",
+   "device": "04d8:00df",
+   "ep": 1,
+   "dir": "from-instrument",
+   "hex": "80 …",
+   "say": "MCP2200: GPIO {gpio} (bit 0 = 0: armed; bit 7 = 0: compartment open)",
+   "fields": [
+    {
+     "name": "gpio",
+     "offset": 10,
+     "type": "u8",
+     "format": "bits"
+    }
+   ]
+  },
+  {
+   "name": "MCP2200: set/clear outputs",
+   "device": "04d8:00df",
+   "ep": 1,
+   "dir": "to-instrument",
+   "hex": "08 …",
+   "say": "MCP2200: outputs set {set} / clear {clear} (the arm pulse the vendor sends; it does not arm by itself)",
+   "fields": [
+    {
+     "name": "set",
+     "offset": 11,
+     "type": "u8",
+     "format": "hex"
+    },
+    {
+     "name": "clear",
+     "offset": 12,
+     "type": "u8",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "MCP2200: configure",
+   "device": "04d8:00df",
+   "ep": 1,
+   "dir": "to-instrument",
+   "hex": "10 …",
+   "say": "MCP2200: configure (GPIO directions, defaults)"
+  },
+  {
+   "name": "PL2303: register read",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x01"
+   },
+   "say": "Prolific bridge: read register {reg} (driver set-up)",
+   "device": "067b:2303",
+   "fields": [
+    {
+     "name": "reg",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "PL2303: register write",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x01"
+   },
+   "say": "Prolific bridge: write register {reg} = {val} (driver set-up)",
+   "device": "067b:2303",
+   "fields": [
+    {
+     "name": "reg",
+     "from": "wValue",
+     "format": "hex"
+    },
+    {
+     "name": "val",
+     "from": "wIndex",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: IFC_ENABLE",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x00"
+   },
+   "say": "Laser driver's bridge (CP210x): IFC_ENABLE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: IFC_ENABLE",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x00"
+   },
+   "say": "Laser driver's bridge (CP210x): IFC_ENABLE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: IFC_ENABLE",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x00"
+   },
+   "say": "Laser driver's bridge (CP210x): IFC_ENABLE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: IFC_ENABLE",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x00"
+   },
+   "say": "Laser driver's bridge (CP210x): IFC_ENABLE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BAUDDIV",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x01"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_BAUDDIV, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BAUDDIV",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x01"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_BAUDDIV, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BAUDDIV",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x01"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_BAUDDIV, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BAUDDIV",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x01"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_BAUDDIV, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_BAUDDIV",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x02"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_BAUDDIV, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_BAUDDIV",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x02"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_BAUDDIV, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_BAUDDIV",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x02"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_BAUDDIV, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_BAUDDIV",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x02"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_BAUDDIV, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_LINE_CTL",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x03"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_LINE_CTL, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_LINE_CTL",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x03"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_LINE_CTL, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_LINE_CTL",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x03"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_LINE_CTL, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_LINE_CTL",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x03"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_LINE_CTL, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_LINE_CTL",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x04"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_LINE_CTL, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_LINE_CTL",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x04"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_LINE_CTL, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_LINE_CTL",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x04"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_LINE_CTL, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_LINE_CTL",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x04"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_LINE_CTL, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BREAK",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x05"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_BREAK, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BREAK",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x05"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_BREAK, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BREAK",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x05"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_BREAK, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BREAK",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x05"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_BREAK, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_MHS",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x07"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_MHS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_MHS",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x07"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_MHS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_MHS",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x07"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_MHS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_MHS",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x07"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_MHS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_MDMSTS",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x08"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_MDMSTS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_MDMSTS",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x08"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_MDMSTS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_MDMSTS",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x08"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_MDMSTS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_MDMSTS",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x08"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_MDMSTS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_PROPS",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x0F"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_PROPS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_PROPS",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x0F"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_PROPS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_PROPS",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x0F"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_PROPS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_PROPS",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x0F"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_PROPS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_COMM_STATUS",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x10"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_COMM_STATUS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_COMM_STATUS",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x10"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_COMM_STATUS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_COMM_STATUS",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x10"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_COMM_STATUS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_COMM_STATUS",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x10"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_COMM_STATUS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: RESET",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x11"
+   },
+   "say": "Laser driver's bridge (CP210x): RESET, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: RESET",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x11"
+   },
+   "say": "Laser driver's bridge (CP210x): RESET, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: RESET",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x11"
+   },
+   "say": "Laser driver's bridge (CP210x): RESET, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: RESET",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x11"
+   },
+   "say": "Laser driver's bridge (CP210x): RESET, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: PURGE",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x12"
+   },
+   "say": "Laser driver's bridge (CP210x): PURGE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: PURGE",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x12"
+   },
+   "say": "Laser driver's bridge (CP210x): PURGE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: PURGE",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x12"
+   },
+   "say": "Laser driver's bridge (CP210x): PURGE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: PURGE",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x12"
+   },
+   "say": "Laser driver's bridge (CP210x): PURGE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_FLOW",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x13"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_FLOW, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_FLOW",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x13"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_FLOW, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_FLOW",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x13"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_FLOW, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_FLOW",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x13"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_FLOW, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_FLOW",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x14"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_FLOW, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_FLOW",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x14"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_FLOW, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_FLOW",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x14"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_FLOW, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_FLOW",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x14"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_FLOW, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_CHARS",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x19"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_CHARS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_CHARS",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x19"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_CHARS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_CHARS",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x19"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_CHARS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_CHARS",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x19"
+   },
+   "say": "Laser driver's bridge (CP210x): SET_CHARS, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_BAUDRATE",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x1D"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_BAUDRATE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_BAUDRATE",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x1D"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_BAUDRATE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_BAUDRATE",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0x1D"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_BAUDRATE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: GET_BAUDRATE",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0x1D"
+   },
+   "say": "Laser driver's bridge (CP210x): GET_BAUDRATE, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: VENDOR_SPECIFIC",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0xFF"
+   },
+   "say": "Laser driver's bridge (CP210x): VENDOR_SPECIFIC, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: VENDOR_SPECIFIC",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0xFF"
+   },
+   "say": "Laser driver's bridge (CP210x): VENDOR_SPECIFIC, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: VENDOR_SPECIFIC",
+   "usb": {
+    "bmRequestType": "0xC1",
+    "bRequest": "0xFF"
+   },
+   "say": "Laser driver's bridge (CP210x): VENDOR_SPECIFIC, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: VENDOR_SPECIFIC",
+   "usb": {
+    "bmRequestType": "0xC0",
+    "bRequest": "0xFF"
+   },
+   "say": "Laser driver's bridge (CP210x): VENDOR_SPECIFIC, value {v}",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "hex"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BAUDRATE",
+   "usb": {
+    "bmRequestType": "0x41",
+    "bRequest": "0x1E"
+   },
+   "say": "Laser driver's bridge (CP210x): {baud} baud",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "baud",
+     "offset": 0,
+     "length": 4,
+     "type": "u32le"
+    }
+   ]
+  },
+  {
+   "name": "CP210x: SET_BAUDRATE",
+   "usb": {
+    "bmRequestType": "0x40",
+    "bRequest": "0x1E"
+   },
+   "say": "Laser driver's bridge (CP210x): {baud} baud",
+   "device": "10c4:ea60",
+   "fields": [
+    {
+     "name": "baud",
+     "offset": 0,
+     "length": 4,
+     "type": "u32le"
+    }
+   ]
+  },
+  {
+   "name": "CDC: set line coding",
+   "usb": {
+    "bmRequestType": "0x21",
+    "bRequest": "0x20"
+   },
+   "say": "Serial line set to {baud} baud, {bits} data bits, parity {parity}",
+   "fields": [
+    {
+     "name": "baud",
+     "offset": 0,
+     "length": 4,
+     "type": "u32le"
+    },
+    {
+     "name": "parity",
+     "offset": 5,
+     "type": "u8",
+     "values": {
+      "0": "none",
+      "1": "odd",
+      "2": "even",
+      "3": "mark",
+      "4": "space"
+     }
+    },
+    {
+     "name": "bits",
+     "offset": 6,
+     "type": "u8"
+    }
+   ]
+  },
+  {
+   "name": "CDC: get line coding",
+   "usb": {
+    "bmRequestType": "0xA1",
+    "bRequest": "0x21"
+   },
+   "say": "Serial line settings read"
+  },
+  {
+   "name": "CDC: control lines",
+   "usb": {
+    "bmRequestType": "0x21",
+    "bRequest": "0x22"
+   },
+   "say": "Serial control lines: {v} (bit 0 DTR, bit 1 RTS)",
+   "fields": [
+    {
+     "name": "v",
+     "from": "wValue",
+     "format": "bits"
+    }
+   ]
+  },
+  {
+   "name": "HID: set idle",
+   "usb": {
+    "bmRequestType": "0x21",
+    "bRequest": "0x0A"
+   },
+   "say": "HID: set idle"
+  },
+  {
+   "name": "USB: device description read",
+   "usb": {
+    "bmRequestType": "0x80",
+    "bRequest": "0x06"
+   },
+   "say": "USB: device description read (GET_DESCRIPTOR)"
+  },
+  {
+   "name": "USB: HID report description read",
+   "usb": {
+    "bmRequestType": "0x81",
+    "bRequest": "0x06"
+   },
+   "say": "USB: HID report description read"
+  },
+  {
+   "name": "USB: configuration chosen",
+   "usb": {
+    "bmRequestType": "0x00",
+    "bRequest": "0x09"
+   },
+   "say": "USB: configuration chosen (SET_CONFIGURATION)"
+  },
+  {
+   "name": "USB: status read",
+   "usb": {
+    "bmRequestType": "0x80",
+    "bRequest": "0x00"
+   },
+   "say": "USB: status read"
+  },
+  {
+   "name": "USB: feature cleared",
+   "usb": {
+    "bmRequestType": "0x00",
+    "bRequest": "0x01"
+   },
+   "say": "USB: feature cleared"
+  },
+  {
+   "name": "USB: endpoint halt cleared",
+   "usb": {
+    "bmRequestType": "0x02",
+    "bRequest": "0x01"
+   },
+   "say": "USB: endpoint halt cleared"
+  },
+  {
+   "name": "USB: interface setting chosen",
+   "usb": {
+    "bmRequestType": "0x01",
+    "bRequest": "0x0B"
+   },
+   "say": "USB: interface setting chosen"
+  },
+  {
+   "name": "USB: configuration read",
+   "usb": {
+    "bmRequestType": "0x80",
+    "bRequest": "0x08"
+   },
+   "say": "USB: configuration read"
+  },
+  {
+   "name": "Hub: port status read",
+   "usb": {
+    "bmRequestType": "0xA3",
+    "bRequest": "0x00"
+   },
+   "say": "Hub: port status read"
+  },
+  {
+   "name": "Hub: port feature set (power/reset)",
+   "usb": {
+    "bmRequestType": "0x23",
+    "bRequest": "0x03"
+   },
+   "say": "Hub: port feature set (power/reset)"
+  },
+  {
+   "name": "Hub: port feature cleared",
+   "usb": {
+    "bmRequestType": "0x23",
+    "bRequest": "0x01"
+   },
+   "say": "Hub: port feature cleared"
+  },
+  {
+   "name": "Hub: hub description read",
+   "usb": {
+    "bmRequestType": "0xA0",
+    "bRequest": "0x06"
+   },
+   "say": "Hub: hub description read"
+  },
+  {
+   "name": "Hub: hub status read",
+   "usb": {
+    "bmRequestType": "0xA0",
+    "bRequest": "0x00"
+   },
+   "say": "Hub: hub status read"
+  },
+  {
+   "name": "PL2303: serial state",
+   "device": "067b:2303",
+   "ep": 1,
+   "dir": "from-instrument",
+   "hex": "a1 20 …",
+   "say": "Prolific bridge: serial line state notification"
+  }
+ ]
+}

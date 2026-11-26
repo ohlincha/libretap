@@ -1,0 +1,87 @@
+{
+  "clock": "Recorder's own wall clock; event t = seconds since 1970-01-01 UTC by that clock",
+  "ended": "2026-11-26T23:39:10.289+01:00",
+  "format": "libretap-session",
+  "host": "",
+  "imported_from": "cora2_init_arm_scan.pcapng",
+  "note": "Demo: the Cora 5000's own USB devices from a USBPcap capture of the vendor software (initialise, arm, preview, scan; 2026-11-20). Only the instrument's devices and hubs are kept; marks added afterwards at the documented steps.",
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "recorder": "LibreTap 0.1.0 (USBPcap import)",
+  "sources": [
+    {
+      "devices": [
+        {
+          "address": 11,
+          "bus": 1,
+          "bytes": 12,
+          "id": "",
+          "kept": true,
+          "kind": "hub",
+          "transfers": 13
+        },
+        {
+          "address": 12,
+          "bus": 1,
+          "bytes": 2781,
+          "id": "067b:2303",
+          "kept": true,
+          "kind": "USB-serial (Prolific PL2303)",
+          "transfers": 2307
+        },
+        {
+          "address": 13,
+          "bus": 1,
+          "bytes": 39734,
+          "id": "04d8:00df",
+          "kept": true,
+          "kind": "serial (CDC)",
+          "transfers": 2503
+        },
+        {
+          "address": 14,
+          "bus": 1,
+          "bytes": 3,
+          "id": "",
+          "kept": true,
+          "kind": "hub",
+          "transfers": 4
+        },
+        {
+          "address": 15,
+          "bus": 1,
+          "bytes": 53618,
+          "id": "ba8c:1688",
+          "kept": true,
+          "kind": "vendor-specific",
+          "transfers": 140
+        },
+        {
+          "address": 16,
+          "bus": 1,
+          "bytes": 1682,
+          "id": "ba8c:1688",
+          "kept": true,
+          "kind": "vendor-specific",
+          "transfers": 64
+        },
+        {
+          "address": 17,
+          "bus": 1,
+          "bytes": 1220,
+          "id": "10c4:ea60",
+          "kept": true,
+          "kind": "USB-serial (Silicon Labs CP210x)",
+          "transfers": 137
+        }
+      ],
+      "dropped_transfers": 8172,
+      "id": "usb",
+      "kind": "usbpcap",
+      "label": "USBPcap: cora2_init_arm_scan.pcapng"
+    }
+  ],
+  "started": "2026-11-20T09:36:02.013+01:00",
+  "t_ended": 1795732750.288971,
+  "t_started": 1795163762.012954,
+  "version": 1
+}

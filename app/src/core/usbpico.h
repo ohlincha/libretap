@@ -18,6 +18,7 @@
 #include <QString>
 #include <QTimer>
 
+#include <array>
 #include <map>
 #include <memory>
 #include <vector>
@@ -36,10 +37,13 @@ struct UsbEvent {
     QByteArray data;
     bool control = false;          // a control transfer (ep 0)
     bool truncated = false;        // the sniffer showed only the first bytes (its display setting)
+    QByteArray setup;              // control transfers: the 8 setup bytes
 };
 
 struct UsbDevice {
-    int vid = -1, pid = -1, maxp0 = 0;
+    int vid = -1, pid = -1, maxp0 = 0, deviceClass = -1;
+    std::vector<std::array<int, 3>> ifaces;        // interface class/subclass/protocol from the configuration
+    QString kindText() const;                      // "keyboard", "mouse", "storage", "hub", "serial", "vendor", …
     std::map<int, std::pair<QString, int>> eps;   // endpoint address (0x81 = ep 1 IN) → (kind, max packet)
 };
 
@@ -53,6 +57,9 @@ public:
     int errors = 0;
     bool truncated = false;
     QStringList summary() const;                 // devices, endpoints, bytes per endpoint, hints
+    // A control transfer in words (also updates `devices` from descriptors and SET_ADDRESS).
+    QString describeControl(int addr, int rt, int req, int val, int idx, int len, const QByteArray& data, bool stalled = false,
+                            bool incomplete = false);
 
 private:
     void line(int t, const QString& body);

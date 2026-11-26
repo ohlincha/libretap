@@ -66,6 +66,7 @@ Source kinds:
 | `serial-tap` | LibreTap | two listen-only lines; `dir` is `a` (PC's TX) or `b` (instrument's TX); `names` gives labels |
 | `usb-pico` | LibreTap | Pico usb-sniffer-lite: `usb` events (control transfers, resets) and `data` per endpoint (below) |
 | `ethernet` | LibreTap | pcapng in `raw/`; `data` per TCP chunk / UDP datagram, `packet` summaries (below) |
+| `usbpcap` | LibreTap (import) | a Windows USBPcap capture read in: the same `usb` / `data` events as `usb-pico` |
 | `camera` | LibreTap | stills of the instrument PC's screen |
 | `screen` | Tick | screenshots (full frames and changed regions) |
 | `api-serial` | Tick | calls the vendor program makes on a COM port |
@@ -119,6 +120,12 @@ i.e. the PC's side) or `in`; `addr` is the device address, `ep` the endpoint num
 {"t":…,"kind":"data","src":"usb","addr":5,"ep":2,"dir":"out","what":"bulk 6 bytes","hex":"4d4541533f0d","t_ms":14.0}
 {"t":…,"kind":"data","src":"usb","addr":5,"ep":1,"dir":"in","what":"bulk 12 bytes","hex":"…"}   // FTDI status bytes removed
 ```
+
+USB events also carry `setup` (the 8 setup bytes of a control transfer, hex) and `dev` (the device's `vid:pid` when
+the capture saw its descriptor). Imported USBPcap captures (`usbpcap`) keep only the devices chosen when importing
+(by USB id or address; hubs optionally); the source entry lists them (`devices`) and counts the left-out transfers
+(`dropped_transfers`). Bulk transfers of USB-serial bridges are joined into lines there (until CR/LF, a 0.3 s pause
+or the other direction), since such bridges often carry one character per transfer.
 
 Control transfers (endpoint 0) are `usb` events, with the data stage in `hex` except for descriptors (decoded in
 `what`). Bulk and interrupt payload is `data`, merged per endpoint until a short packet or a 10 ms pause (interrupt:

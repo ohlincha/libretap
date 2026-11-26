@@ -85,6 +85,23 @@ quint16 u16(const QByteArray& d, int i) { return quint16(uchar(d[i]) | uchar(d[i
 QString hex4(int v) { return QStringLiteral("%1").arg(v, 4, 16, QLatin1Char('0')); }
 }  // namespace
 
+QString UsbDevice::kindText() const {
+    if (deviceClass == 9) return QStringLiteral("hub");
+    if (!bridgeName(vid).isEmpty()) return QStringLiteral("USB-serial (%1)").arg(bridgeName(vid));
+    for (const auto& i : ifaces) {
+        if (i[0] == 3 && i[2] == 1) return QStringLiteral("keyboard");
+        if (i[0] == 3 && i[2] == 2) return QStringLiteral("mouse");
+    }
+    for (const auto& i : ifaces) {
+        if (i[0] == 9) return QStringLiteral("hub");
+        if (i[0] == 8) return QStringLiteral("storage");
+        if (i[0] == 3) return QStringLiteral("HID");
+        if (i[0] == 2 || i[0] == 10) return QStringLiteral("serial (CDC)");
+        if (i[0] == 0xFF) return QStringLiteral("vendor-specific");
+    }
+    return vid >= 0 ? QStringLiteral("device") : QStringLiteral("unknown");
+}
+
 QString ftdiBaudText(int val, int idx) {
     static const double frac[] = {0, 0.5, 0.25, 0.125, 0.375, 0.625, 0.75, 0.875};
     const double div = (val & 0x3FFF) + frac[((val >> 14) & 3) | ((idx & 1) << 2)];
@@ -300,6 +317,20 @@ void UsbDecoder::flushAll() {
 void UsbDecoder::controlDone(const UsbControl& c, bool stalled, bool incomplete) {
     const int typ = (c.rt >> 5) & 3;
     const bool in = c.rt & 0x80;
+    const QString name = describeControl(c.addr, c.rt, c.req, c.val, c.idx, c.len, c.data, stalled, incomplete);
+    event(c.t, c.addr, 0, in ? QStringLiteral("IN") : QStringLiteral("OUT"), name,
+          (typ == 0 && c.req == 6) ? QByteArray() : c.data, c.trunc, true);
+    QByteArray setup(8, 0);
+    setup[0] = char(c.rt), setup[1] = char(c.req), setup[2] = char(c.val), setup[3] = char(c.val >> 8), setup[4] = char(c.idx),
+    setup[5] = char(c.idx >> 8), setup[6] = char(c.len), setup[7] = char(c.len >> 8);
+    events.back().setup = setup;
+}
+
+QString UsbDecoder::describeControl(int addr, int rt, int req, int val, int idx, int len, const QByteArray& data, bool stalled, bool incomplete) {
+    UsbControl c;
+    c.addr = addr, c.rt = rt, c.req = req, c.val = val, c.idx = idx, c.len = len, c.data = data;
+    const int typ = (c.rt >> 5) & 3;
+    const bool in = c.rt & 0x80;
     UsbDevice& dev = devices[c.addr];
     QString name;
     if (typ == 0) {
@@ -334,8 +365,7 @@ void UsbDecoder::controlDone(const UsbControl& c, bool stalled, bool incomplete)
     }
     if (stalled) name += QStringLiteral("  [STALL]");
     if (incomplete) name += QStringLiteral("  [incomplete]");
-    event(c.t, c.addr, 0, in ? QStringLiteral("IN") : QStringLiteral("OUT"), name,
-          (typ == 0 && c.req == 6) ? QByteArray() : c.data, c.trunc, true);
+    return name;
 }
 
 QString UsbDecoder::descriptor(int addr, int dt, const QByteArray& d) {
@@ -344,6 +374,7 @@ QString UsbDecoder::descriptor(int addr, int dt, const QByteArray& d) {
         const int usb = u16(d, 2), vid = u16(d, 8), pid = u16(d, 10);
         dev.vid = vid;
         dev.pid = pid;
+        dev.deviceClass = uchar(d[4]);
         dev.maxp0 = uchar(d[7]);
         QString s = QStringLiteral("USB %1.%2, VID %3 PID %4, class %5/%6/%7, ep0 %8 bytes")
                         .arg(usb >> 8, 0, 16).arg(usb & 0xFF, 2, 16, QLatin1Char('0')).arg(hex4(vid), hex4(pid))
@@ -360,6 +391,7 @@ QString UsbDecoder::descriptor(int addr, int dt, const QByteArray& d) {
             const int ln = uchar(d[i]), t = uchar(d[i + 1]);
             if (ln < 2) break;
             const QByteArray b = d.mid(i, ln);
+            if (t == 4 && b.size() >= 9) dev.ifaces.push_back({uchar(b[5]), uchar(b[6]), uchar(b[7])});
             if (t == 4 && b.size() >= 9)
                 parts << QStringLiteral("interface %1 alt %2 class %3/%4/%5").arg(uchar(b[2])).arg(uchar(b[3]))
                              .arg(uchar(b[5]), 2, 16, QLatin1Char('0')).arg(uchar(b[6]), 2, 16, QLatin1Char('0')).arg(uchar(b[7]), 2, 16, QLatin1Char('0'));
@@ -583,6 +615,9 @@ void PicoSource::decodeAndWrite(const QString& dump) {
         if (!e.dir.isEmpty()) f.insert(QStringLiteral("dir"), e.dir == QLatin1String("IN") ? QStringLiteral("in") : QStringLiteral("out"));
         if (!e.data.isEmpty()) f.insert(QStringLiteral("hex"), QString::fromLatin1(e.data.toHex()));
         if (e.truncated) f.insert(QStringLiteral("truncated"), true);
+        if (!e.setup.isEmpty()) f.insert(QStringLiteral("setup"), QString::fromLatin1(e.setup.toHex()));
+        if (e.addr >= 0 && dec.devices.count(e.addr) && dec.devices.at(e.addr).vid >= 0)
+            f.insert(QStringLiteral("dev"), QStringLiteral("%1:%2").arg(dec.devices.at(e.addr).vid, 4, 16, QLatin1Char('0')).arg(dec.devices.at(e.addr).pid, 4, 16, QLatin1Char('0')));
         f.insert(QStringLiteral("t_ms"), e.tMs);
         const bool payload = !e.control && e.ep > 0 && !e.data.isEmpty();
         if (payload) bytes_ += e.data.size();

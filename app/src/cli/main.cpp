@@ -8,17 +8,21 @@
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMultiMap>
 #include <QTimer>
 
 #include <atomic>
 #include <csignal>
 #include <cstdio>
 
+#include "core/analysis.h"
 #include "core/camerasource.h"
+#include "core/protocol.h"
 #include "core/control.h"
 #include "core/devices.h"
 #include "core/ethernet.h"
 #include "core/pcap.h"
+#include "core/usbpcap.h"
 #include "core/usbpico.h"
 #include "core/match.h"
 #include "core/project.h"
@@ -51,6 +55,21 @@ const char* const kUsage = R"(LibreTapCLI — record what old vendor software sa
   LibreTapCLI import REC SESSION             add a session folder (e.g. from Tick) to a recording and match it
   LibreTapCLI decode-usb DUMP [--low] [--ftdi]   decode a usb-sniffer-lite text dump into transfers
   LibreTapCLI pcap FILE [--ip IP]            a pcap/pcapng file as conversations and packet summaries
+  LibreTapCLI import-usbpcap FILE [--device VID:PID|ADDRESS]… [--hubs] [--all] [--name NAME]
+                                             a Windows USBPcap capture as a new recording, chosen devices only
+                                             (without --device: lists the devices; keyboards may hold passwords)
+
+Analysis (REC: folder, name or "latest"; a moment is --mark N or --at SECONDS from the start):
+  LibreTapCLI exchanges REC                  questions and answers per link, repeats folded, with counts and timing
+  LibreTapCLI diff REC --mark A --mark B     what differs between two moments, per kind of message, byte by byte
+  LibreTapCLI hints REC [--family TEXT]      per kind of message: text/binary, line end, header, length field,
+                                             checksum candidates, what varies (and how it follows the marks)
+  LibreTapCLI grep REC TEXT | hex:AA BB      messages containing it
+  LibreTapCLI stats REC                      links, messages, bytes, kinds of message, marks, pictures
+  LibreTapCLI screen REC --at T|--mark N --out FILE.png   the screen (camera or Tick) at that moment
+  LibreTapCLI keyframes REC [--out DIR]      moments where the screen changed near a mark or a changed command
+  LibreTapCLI export REC --ai DIR            index.md + traffic, exchanges, hints, diffs between marks, key frames
+  LibreTapCLI decode REC --protocol FILE [--unexplained]  each message in a sentence, and how much is explained
 
 Add --json to any command for JSON output. The window and `record` listen on a local socket (libretap-<user>,
 or $LIBRETAP_CONTROL), so status/start/mark/sync/stop reach whichever is running.
@@ -331,6 +350,338 @@ int cmdPcap(const QStringList& args) {
             out(QStringLiteral("%1  %2").arg(clockText(e.t - t0), 11).arg(e.fields.value(QStringLiteral("text")).toString()));
     }
     out(QString::fromUtf8(QJsonDocument(f.stats()).toJson(QJsonDocument::Compact)));
+    return 0;
+}
+
+int cmdImportUsbPcap(const QStringList& args) {
+    QString file, name;
+    UsbPcapFilter f;
+    for (int i = 0; i < args.size(); ++i) {
+        const QString& a = args[i];
+        if (a == QLatin1String("--device") && i + 1 < args.size()) {
+            const QString v = args[++i];
+            bool num = false;
+            const int addr = v.toInt(&num);
+            if (num) f.addresses.insert(addr);
+            else f.ids << v.toLower();
+        } else if (a == QLatin1String("--hubs")) f.hubs = true;
+        else if (a == QLatin1String("--all")) f.all = true;
+        else if (a == QLatin1String("--name") && i + 1 < args.size()) name = args[++i];
+        else file = a;
+    }
+    QString err;
+    UsbPcapResult scan;
+    if (!scanUsbPcap(file, &scan, &err)) return fail(err, 2);
+    auto listDevices = [&](const UsbPcapResult& r) {
+        QJsonArray arr;
+        for (const UsbPcapDevice& d : r.devices) arr.append(d.toJson());
+        return arr;
+    };
+    if (f.ids.isEmpty() && f.addresses.empty() && !f.all && !f.hubs) {
+        if (gJson) {
+            outJson({{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("choose devices with --device")}, {QStringLiteral("devices"), listDevices(scan)}});
+        } else {
+            out(QStringLiteral("devices in %1 (choose with --device VID:PID or ADDRESS; keyboards and USB sticks may hold private data):").arg(file));
+            for (const UsbPcapDevice& d : scan.devices)
+                out(QStringLiteral("  address %1  %2  %3, %4 transfers, %5 bytes").arg(d.addr, 3).arg(d.id.isEmpty() ? QStringLiteral("?        ") : d.id, d.kind).arg(d.transfers).arg(d.bytes));
+        }
+        return 2;
+    }
+    QString base = stampName(scan.t0) + QStringLiteral("-usbpcap") + (name.isEmpty() ? QString() : QLatin1Char('-') + name);
+    const QString folder = QDir(workspaceDir()).filePath(base);
+    Project p;
+    if (!Project::create(folder, &p, &err)) return fail(err);
+    SessionWriter w;
+    const QString sessionFolder = QDir(folder).filePath(base);
+    if (!w.create(sessionFolder, {{QStringLiteral("recorder"), recorderName() + QStringLiteral(" (USBPcap import)")},
+                                  {QStringLiteral("started"), isoLocal(scan.t0)}, {QStringLiteral("t_started"), scan.t0},
+                                  {QStringLiteral("imported_from"), QFileInfo(file).fileName()},
+                                  {QStringLiteral("host"), QString()}, {QStringLiteral("os"), QStringLiteral("Windows (USBPcap)")}}, &err))
+        return fail(err);
+    UsbPcapResult r;
+    if (!importUsbPcap(file, &w, f, &r, &err)) return fail(err);
+    QJsonArray kept;
+    for (const UsbPcapDevice& d : r.devices)
+        if (d.kept) kept.append(d.toJson());
+    w.setSources({QJsonObject{{QStringLiteral("id"), QStringLiteral("usb")}, {QStringLiteral("kind"), QStringLiteral("usbpcap")},
+                              {QStringLiteral("label"), QStringLiteral("USBPcap: %1").arg(QFileInfo(file).fileName())},
+                              {QStringLiteral("devices"), kept}, {QStringLiteral("dropped_transfers"), r.dropped}}});
+    w.finish();
+    p.addSession(sessionFolder, &err);
+    p.save(&err);
+    if (gJson) {
+        outJson({{QStringLiteral("ok"), true}, {QStringLiteral("project"), folder}, {QStringLiteral("written"), r.written},
+                 {QStringLiteral("dropped"), r.dropped}, {QStringLiteral("devices"), listDevices(r)}});
+    } else {
+        out(QStringLiteral("imported %1 transfers into %2; %3 transfers of other devices left out").arg(r.written).arg(folder).arg(r.dropped));
+        for (const UsbPcapDevice& d : r.devices)
+            out(QStringLiteral("  %1 address %2  %3  %4").arg(d.kept ? QStringLiteral("kept   ") : QStringLiteral("dropped")).arg(d.addr, 3).arg(d.id.isEmpty() ? QStringLiteral("?") : d.id, d.kind));
+    }
+    return 0;
+}
+
+struct Rec {
+    Project p;
+    Timeline tl;
+    std::vector<Msg> msgs;
+};
+
+bool openRec(const QString& target, Rec* r, QString* err) {
+    const QString path = resolve(target.isEmpty() ? QStringLiteral("latest") : target);
+    if (path.isEmpty()) {
+        *err = QStringLiteral("no recording %1 (try LibreTapCLI sessions)").arg(target);
+        return false;
+    }
+    if (!Project::load(path, &r->p, err)) return false;
+    r->tl.build(r->p);
+    r->msgs = messages(r->p, r->tl);
+    return true;
+}
+
+// positional arguments and --key value options
+struct Args {
+    QStringList pos;
+    QMultiMap<QString, QString> opt;
+    QStringList flags;
+    Args(const QStringList& a, const QStringList& valued) {
+        for (int i = 0; i < a.size(); ++i) {
+            if (a[i].startsWith(QLatin1String("--"))) {
+                const QString k = a[i].mid(2);
+                if (valued.contains(k) && i + 1 < a.size()) opt.insert(k, a[++i]);
+                else flags << k;
+            } else {
+                pos << a[i];
+            }
+        }
+    }
+    QStringList all(const QString& k) const {
+        QStringList v = opt.values(k);
+        std::reverse(v.begin(), v.end());
+        return v;
+    }
+};
+
+int cmdExchanges(const QStringList& a) {
+    Args args(a, {});
+    Rec r;
+    QString err;
+    if (!openRec(args.pos.value(0), &r, &err)) return fail(err);
+    const auto ex = exchanges(r.msgs);
+    if (gJson) {
+        QJsonArray arr;
+        for (const auto& g : ex) arr.append(g.toJson());
+        outJson({{QStringLiteral("ok"), true}, {QStringLiteral("exchanges"), arr}});
+        return 0;
+    }
+    for (const auto& g : ex) out(QStringLiteral("%1  %2").arg(clockText(g.first - r.tl.start), 11).arg(g.sentence()));
+    return 0;
+}
+
+int cmdDiff(const QStringList& a) {
+    Args args(a, {QStringLiteral("mark"), QStringLiteral("at")});
+    Rec r;
+    QString err;
+    if (!openRec(args.pos.value(0), &r, &err)) return fail(err);
+    QStringList specs;
+    QList<bool> isMark;
+    for (int i = 0; i < a.size(); ++i)
+        if ((a[i] == QLatin1String("--mark") || a[i] == QLatin1String("--at")) && i + 1 < a.size()) specs << a[i + 1], isMark << (a[i] == QLatin1String("--mark"));
+    if (specs.size() != 2) return fail(QStringLiteral("diff needs two moments: --mark A --mark B, or --at T1 --at T2"), 2);
+    double f[2], t[2];
+    QString label[2];
+    for (int k = 0; k < 2; ++k)
+        if (!resolveMoment(r.tl, r.p, specs[k], isMark[k], &f[k], &t[k], &label[k], &err)) return fail(err, 2);
+    const auto rows = diffMoments(r.msgs, f[0], t[0], f[1], t[1]);
+    if (gJson) {
+        QJsonArray arr;
+        for (const auto& d : rows) arr.append(d.toJson());
+        outJson({{QStringLiteral("ok"), true}, {QStringLiteral("a"), label[0]}, {QStringLiteral("b"), label[1]}, {QStringLiteral("rows"), arr}});
+        return 0;
+    }
+    out(QStringLiteral("A = %1, B = %2 (the last message of each kind; changed bytes marked ^)").arg(label[0], label[1]));
+    for (const auto& d : rows) {
+        if (d.status == QLatin1String("same") && !args.flags.contains(QStringLiteral("all"))) continue;
+        out(QStringLiteral("%1  [%2]").arg(d.family, d.status));
+        auto show = [&](const char* tag, const Msg* m) {
+            if (!m) return;
+            out(QStringLiteral("  %1  %2").arg(QLatin1String(tag), m->text));
+            QString hx = hexView(m->bytes, 64), carets;
+            for (int i = 0; i < std::min<int>(int(m->bytes.size()), 64); ++i)
+                carets += std::find(d.changed.begin(), d.changed.end(), i) != d.changed.end() ? QStringLiteral("^^ ") : QStringLiteral("   ");
+            out(QStringLiteral("     %1").arg(hx));
+            if (d.status == QLatin1String("changed")) out(QStringLiteral("     %1").arg(carets.trimmed().isEmpty() ? QString() : carets));
+        };
+        show("A", d.a);
+        show("B", d.b);
+    }
+    const int same = int(std::count_if(rows.begin(), rows.end(), [](const DiffRow& d) { return d.status == QLatin1String("same"); }));
+    if (same) out(QStringLiteral("(%1 kinds of message are the same; --all shows them)").arg(same));
+    return 0;
+}
+
+int cmdHints(const QStringList& a) {
+    Args args(a, {QStringLiteral("family")});
+    Rec r;
+    QString err;
+    if (!openRec(args.pos.value(0), &r, &err)) return fail(err);
+    const QString only = args.opt.value(QStringLiteral("family"));
+    QJsonArray arr;
+    for (const auto& h : hints(r.msgs, r.tl)) {
+        if (!only.isEmpty() && !h.family.contains(only, Qt::CaseInsensitive)) continue;
+        if (gJson) arr.append(h.toJson());
+        else out(h.lines().join(QLatin1Char('\n')));
+    }
+    if (gJson) outJson({{QStringLiteral("ok"), true}, {QStringLiteral("families"), arr}});
+    return 0;
+}
+
+int cmdGrep(const QStringList& a) {
+    Args args(a, {});
+    if (args.pos.size() < 2) return fail(QStringLiteral("grep REC TEXT (or hex:AA BB)"), 2);
+    Rec r;
+    QString err;
+    if (!openRec(args.pos[0], &r, &err)) return fail(err);
+    const QString pat = args.pos.mid(1).join(QLatin1Char(' '));
+    const bool hex = pat.startsWith(QLatin1String("hex:"));
+    const QByteArray needle = hex ? QByteArray::fromHex(pat.mid(4).toLatin1()) : pat.toLatin1();
+    QJsonArray arr;
+    for (const Msg& m : r.msgs) {
+        const bool hit = m.bytes.contains(needle) || (!hex && m.text.contains(pat, Qt::CaseInsensitive));
+        if (!hit) continue;
+        if (gJson) arr.append(QJsonObject{{QStringLiteral("t"), m.t}, {QStringLiteral("rel"), m.t - r.tl.start}, {QStringLiteral("link"), m.link},
+                                          {QStringLiteral("to_instrument"), m.role == 0}, {QStringLiteral("text"), m.text}, {QStringLiteral("hex"), QString::fromLatin1(m.bytes.toHex())}});
+        else out(QStringLiteral("%1  %2 %3  %4").arg(clockText(m.t - r.tl.start), 11).arg(m.link, m.role ? QStringLiteral("←") : QStringLiteral("→"), m.text));
+    }
+    if (gJson) outJson({{QStringLiteral("ok"), true}, {QStringLiteral("matches"), arr}});
+    return 0;
+}
+
+int cmdStats(const QStringList& a) {
+    Args args(a, {});
+    Rec r;
+    QString err;
+    if (!openRec(args.pos.value(0), &r, &err)) return fail(err);
+    QJsonObject s = stats(r.p, r.tl, r.msgs);
+    if (gJson) {
+        s.insert(QStringLiteral("ok"), true);
+        outJson(s);
+        return 0;
+    }
+    out(QStringLiteral("%1: %2, %3 messages of %4 kinds, %5 marks, %6 syncs").arg(r.p.name, clockText(s.value(QStringLiteral("seconds")).toDouble(), false))
+            .arg(s.value(QStringLiteral("messages")).toInt()).arg(s.value(QStringLiteral("families")).toInt())
+            .arg(s.value(QStringLiteral("marks")).toInt()).arg(s.value(QStringLiteral("syncs")).toInt()));
+    for (const QJsonValue& v : s.value(QStringLiteral("links")).toArray()) {
+        const QJsonObject l = v.toObject();
+        out(QStringLiteral("  %1: %2 messages (%3 bytes) to the instrument, %4 (%5 bytes) back").arg(l.value(QStringLiteral("link")).toString())
+                .arg(l.value(QStringLiteral("messages_to_instrument")).toInt()).arg(l.value(QStringLiteral("bytes_to_instrument")).toInt())
+                .arg(l.value(QStringLiteral("messages_from_instrument")).toInt()).arg(l.value(QStringLiteral("bytes_from_instrument")).toInt()));
+    }
+    for (const QJsonValue& v : s.value(QStringLiteral("pictures")).toArray())
+        out(QStringLiteral("  pictures: %1, %2").arg(v.toObject().value(QStringLiteral("label")).toString()).arg(v.toObject().value(QStringLiteral("count")).toInt()));
+    return 0;
+}
+
+int cmdScreen(const QStringList& a) {
+    Args args(a, {QStringLiteral("at"), QStringLiteral("mark"), QStringLiteral("out"), QStringLiteral("picture")});
+    Rec r;
+    QString err;
+    if (!openRec(args.pos.value(0), &r, &err)) return fail(err);
+    double t;
+    if (args.opt.contains(QStringLiteral("mark"))) {
+        double f, to;
+        QString label;
+        if (!resolveMoment(r.tl, r.p, args.opt.value(QStringLiteral("mark")), true, &f, &to, &label, &err)) return fail(err, 2);
+        t = f + 0.5;   // just after the mark: what the operator was looking at
+    } else {
+        t = r.tl.start + args.opt.value(QStringLiteral("at"), QStringLiteral("0")).toDouble();
+    }
+    const QString file = args.opt.value(QStringLiteral("out"), QStringLiteral("screen.png"));
+    double ft = 0;
+    const QImage img = screenAt(r.p, r.tl, t, args.opt.value(QStringLiteral("picture"), QStringLiteral("0")).toInt(), &ft);
+    if (img.isNull()) return fail(r.tl.pictures.empty() ? QStringLiteral("this recording has no pictures") : QStringLiteral("no picture yet at that time"));
+    if (!img.save(file)) return fail(QStringLiteral("cannot write %1").arg(file));
+    if (gJson) outJson({{QStringLiteral("ok"), true}, {QStringLiteral("file"), QFileInfo(file).absoluteFilePath()}, {QStringLiteral("t"), t},
+                        {QStringLiteral("picture_t"), ft}, {QStringLiteral("picture_age_s"), t - ft}, {QStringLiteral("width"), img.width()}, {QStringLiteral("height"), img.height()}});
+    else out(QStringLiteral("%1: picture from %2 (%3 s before), %4×%5").arg(QFileInfo(file).absoluteFilePath(), clockText(ft - r.tl.start)).arg(t - ft, 0, 'f', 1).arg(img.width()).arg(img.height()));
+    return 0;
+}
+
+int cmdKeyframes(const QStringList& a) {
+    Args args(a, {QStringLiteral("out")});
+    Rec r;
+    QString err;
+    if (!openRec(args.pos.value(0), &r, &err)) return fail(err);
+    const auto keys = keyFrames(r.p, r.tl, r.msgs, args.opt.value(QStringLiteral("out")));
+    QJsonArray arr;
+    for (const KeyFrame& k : keys) {
+        if (gJson) arr.append(QJsonObject{{QStringLiteral("t"), k.t}, {QStringLiteral("rel"), k.t - r.tl.start}, {QStringLiteral("file"), k.file},
+                                          {QStringLiteral("reasons"), QJsonArray::fromStringList(k.reasons)}});
+        else out(QStringLiteral("%1  %2  %3").arg(clockText(k.t - r.tl.start), 11).arg(k.file.isEmpty() ? QStringLiteral("-") : k.file, k.reasons.join(QStringLiteral("; "))));
+    }
+    if (gJson) outJson({{QStringLiteral("ok"), true}, {QStringLiteral("keyframes"), arr}});
+    else if (keys.empty()) out(r.tl.pictures.empty() ? QStringLiteral("no pictures in this recording") : QStringLiteral("no key frames (no marks and no changed commands)"));
+    return 0;
+}
+
+int cmdExport(const QStringList& a) {
+    Args args(a, {QStringLiteral("ai")});
+    Rec r;
+    QString err;
+    if (!openRec(args.pos.value(0), &r, &err)) return fail(err);
+    const QString dir = args.opt.value(QStringLiteral("ai"));
+    if (dir.isEmpty()) return fail(QStringLiteral("export REC --ai DIR"), 2);
+    QString index;
+    if (!exportForAi(r.p, dir, &index, &err)) return fail(err);
+    if (gJson) outJson({{QStringLiteral("ok"), true}, {QStringLiteral("index"), QFileInfo(index).absoluteFilePath()}});
+    else out(QStringLiteral("written: %1").arg(QFileInfo(index).absoluteFilePath()));
+    return 0;
+}
+
+int cmdDecode(const QStringList& a) {
+    Args args(a, {QStringLiteral("protocol")});
+    Rec r;
+    QString err;
+    if (!openRec(args.pos.value(0), &r, &err)) return fail(err);
+    Protocol proto;
+    if (!proto.load(args.opt.value(QStringLiteral("protocol")), &err)) return fail(err, 2);
+    const bool onlyUnexplained = args.flags.contains(QStringLiteral("unexplained"));
+    Coverage cov;
+    QJsonArray rows;
+    for (const TItem& it : r.tl.rows) {
+        const Decoded d = proto.decode(r.p, it, r.tl);
+        if (d.total == 0) continue;
+        const RowText rt = describe(r.p, it);
+        const Event& e = r.tl.event(r.p, it);
+        ++cov.messages;
+        cov.total += d.total;
+        cov.explained += d.explained;
+        if (d.message >= 0) ++cov.matched;
+        else {
+            const QByteArray bytes = e.kind == QLatin1String("usb") ? QByteArray::fromHex(e.str("setup").toLatin1()) + e.bytes() : e.bytes();
+            auto& u = cov.unexplained[rt.who.section(QLatin1Char(' '), 0, 2) + QStringLiteral(" ") + (e.kind == QLatin1String("usb") ? e.str("what").section(QLatin1Char(' '), 0, 0) : familyKey(bytes))];
+            ++u.first;
+            u.second += d.total;
+        }
+        if (onlyUnexplained && d.message >= 0) continue;
+        if (gJson)
+            rows.append(QJsonObject{{QStringLiteral("t"), it.t}, {QStringLiteral("rel"), it.t - r.tl.start}, {QStringLiteral("who"), rt.who}, {QStringLiteral("text"), rt.text},
+                                    {QStringLiteral("explained"), d.message >= 0}, {QStringLiteral("message"), d.message >= 0 ? proto.messages[size_t(d.message)].name : QString()},
+                                    {QStringLiteral("sentence"), d.sentence}, {QStringLiteral("bytes_explained"), d.explained}, {QStringLiteral("bytes"), d.total}});
+        else
+            out(QStringLiteral("%1  %2  %3").arg(clockText(it.t - r.tl.start), 11).arg(rt.who, -30)
+                    .arg(d.message >= 0 ? d.sentence : QStringLiteral("?? ") + rt.text));
+    }
+    if (gJson) {
+        outJson({{QStringLiteral("ok"), true}, {QStringLiteral("protocol"), proto.name}, {QStringLiteral("coverage"), cov.toJson()}, {QStringLiteral("rows"), rows}});
+        return 0;
+    }
+    out(QStringLiteral("coverage: %1% of the bytes explained (%2 of %3 messages)").arg(cov.percent(), 0, 'f', 1).arg(cov.matched).arg(cov.messages));
+    const QJsonArray un = cov.toJson().value(QStringLiteral("unexplained")).toArray();
+    for (int i = 0; i < std::min<int>(10, int(un.size())); ++i) {
+        const QJsonObject u = un[i].toObject();
+        out(QStringLiteral("  not explained: %1 (%2 messages, %3 bytes)").arg(u.value(QStringLiteral("family")).toString())
+                .arg(u.value(QStringLiteral("messages")).toInt()).arg(u.value(QStringLiteral("bytes")).toInt()));
+    }
     return 0;
 }
 
@@ -654,5 +1005,15 @@ int main(int argc, char** argv) {
     if (cmd == QLatin1String("import")) return cmdImport(raw);
     if (cmd == QLatin1String("decode-usb")) return cmdDecodeUsb(raw);
     if (cmd == QLatin1String("pcap")) return cmdPcap(raw);
+    if (cmd == QLatin1String("import-usbpcap")) return cmdImportUsbPcap(raw);
+    if (cmd == QLatin1String("exchanges")) return cmdExchanges(raw);
+    if (cmd == QLatin1String("diff")) return cmdDiff(raw);
+    if (cmd == QLatin1String("hints")) return cmdHints(raw);
+    if (cmd == QLatin1String("grep")) return cmdGrep(raw);
+    if (cmd == QLatin1String("stats")) return cmdStats(raw);
+    if (cmd == QLatin1String("screen")) return cmdScreen(raw);
+    if (cmd == QLatin1String("keyframes")) return cmdKeyframes(raw);
+    if (cmd == QLatin1String("export")) return cmdExport(raw);
+    if (cmd == QLatin1String("decode")) return cmdDecode(raw);
     return fail(QStringLiteral("unknown command %1; LibreTapCLI help").arg(cmd), 2);
 }

@@ -41,6 +41,8 @@
 #include "core/match.h"
 #include "core/util.h"
 #include "splash.h"
+#include "analysisviews.h"
+#include "core/analysis.h"
 #include "theme.h"
 
 namespace lt::gui {
@@ -77,6 +79,7 @@ QFrame* card(const QString& title, QBoxLayout** body) {
     if (!title.isEmpty()) {
         auto* t = new QLabel(title);
         t->setObjectName(QStringLiteral("cardTitle"));
+        t->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
         v->addWidget(t);
     }
     *body = v;
@@ -99,7 +102,7 @@ QTableView* table(RowModel* m) {
     v->setAlternatingRowColors(false);
     v->horizontalHeader()->setStretchLastSection(true);
     v->setColumnWidth(0, 96);
-    v->setColumnWidth(1, 190);
+    v->setColumnWidth(1, 240);
     v->setColumnWidth(2, 380);
     return v;
 }
@@ -289,6 +292,7 @@ QWidget* MainWindow::buildRecordPage() {
     cl->setHorizontalSpacing(10);
     cl->setVerticalSpacing(8);
     connBody->addLayout(cl);
+    connBody->addStretch(1);   // when the card is taller than its rows: the space below
     cl->setColumnStretch(1, 1);
     tapDot_ = dot();
     tapText_ = new QLabel;
@@ -461,6 +465,29 @@ QWidget* MainWindow::buildTimelinePage() {
     addTick->setObjectName(QStringLiteral("addTick"));
     addTick->setToolTip(QStringLiteral("Combine a recording that Tick made on the instrument PC at the same time"));
     connect(addTick, &QPushButton::clicked, this, &MainWindow::addTickDialog);
+    auto* analyze = new QPushButton(QStringLiteral("Analyze"));
+    analyze->setObjectName(QStringLiteral("suggested"));
+    auto* am = new QMenu(analyze);
+    am->addAction(QStringLiteral("Compare two moments…"), this, [this] { openCompare(); });
+    am->addAction(QStringLiteral("Questions and answers"), this, &MainWindow::showExchanges);
+    am->addAction(QStringLiteral("Clues per kind of message"), this, &MainWindow::showHints);
+    am->addSeparator();
+    am->addAction(QStringLiteral("Load protocol description…"), this, [this] {
+        const QString f = QFileDialog::getOpenFileName(this, QStringLiteral("Protocol description"), QString(), QStringLiteral("Protocol descriptions (*.json)"));
+        if (!f.isEmpty()) loadProtocol(f);
+    });
+    am->addAction(QStringLiteral("Export for an assistant or a colleague…"), this, [this] {
+        const QString d = QFileDialog::getExistingDirectory(this, QStringLiteral("Export into (an empty folder)"), workspaceDir());
+        if (d.isEmpty()) return;
+        QString index, err;
+        if (exportForAi(project_, d, &index, &err)) statusBar()->showMessage(QStringLiteral("Written: %1").arg(index), 15000);
+        else QMessageBox::warning(this, QStringLiteral("Export"), err);
+    });
+    am->addAction(QStringLiteral("Save this screen picture…"), this, [this] {
+        const QString f = QFileDialog::getSaveFileName(this, QStringLiteral("Save the picture"), QString(), QStringLiteral("PNG (*.png)"));
+        if (!f.isEmpty() && !picture_->image().isNull()) picture_->image().save(f);
+    });
+    analyze->setMenu(am);
     auto* clocks = new QPushButton(QStringLiteral("Clocks…"));
     connect(clocks, &QPushButton::clicked, this, &MainWindow::clocksDialog);
     auto* folder = new QPushButton(QStringLiteral("Show folder"));
@@ -469,6 +496,7 @@ QWidget* MainWindow::buildTimelinePage() {
         if (!f.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(f));
     });
     head->addWidget(tlTitle_, 1);
+    head->addWidget(analyze);
     head->addWidget(addTick);
     head->addWidget(clocks);
     head->addWidget(folder);
@@ -479,6 +507,7 @@ QWidget* MainWindow::buildTimelinePage() {
 
     auto* split = new QSplitter(Qt::Vertical);
     auto* picBox = new QWidget;
+    picBox->setObjectName(QStringLiteral("pictureBox"));
     auto* pl = new QVBoxLayout(picBox);
     pl->setContentsMargins(0, 0, 0, 0);
     pictureBox_ = new QComboBox;
@@ -942,6 +971,7 @@ void MainWindow::reloadTimeline(double keep) {
         if (tl_.event(project_, it).kind == QLatin1String("data")) traffic.emplace_back(it.t, r.dir);
     }
     rows_->setRows(std::move(rows), tl_.start);
+    if (protoLoaded_) applyProtocol();
     bar_->setRange(tl_.start, tl_.end);
     bar_->setTraffic(std::move(traffic));
     std::vector<TimelineBar::Flag> marks, syncs;
@@ -958,6 +988,7 @@ void MainWindow::reloadTimeline(double keep) {
     pictureBox_->clear();
     for (const Picture& p : tl_.pictures) pictureBox_->addItem(QStringLiteral("%1 (%2 pictures)").arg(p.label).arg(p.frames.size()));
     pictureBox_->setVisible(tl_.pictures.size() > 1);
+    if (QWidget* pb = findChild<QWidget*>(QStringLiteral("pictureBox"))) pb->setVisible(!tl_.pictures.empty());   // no pictures: more room for the traffic
     pictureBox_->blockSignals(false);
     picture_->setPlaceholder(tl_.pictures.empty() ? QStringLiteral("No pictures in this recording.\nAdd a Tick session to see the instrument PC's screen.")
                                                   : QStringLiteral("No picture yet at this time."));
@@ -998,6 +1029,81 @@ void MainWindow::showPicture() {
                                                     : QStringLiteral("%1 · picture from %2 (%3 s before)")
                                                           .arg(tl_.pictures[size_t(k)].label, clockText(ft - tl_.start))
                                                           .arg(t - ft, 0, 'f', 1));
+}
+
+bool MainWindow::loadProtocol(const QString& path) {
+    QString err;
+    Protocol p;
+    if (!p.load(path, &err)) {
+        QMessageBox::warning(this, QStringLiteral("Protocol description"), err);
+        return false;
+    }
+    proto_ = std::move(p);
+    protoLoaded_ = true;
+    applyProtocol();
+    return true;
+}
+
+void MainWindow::applyProtocol() {
+    std::vector<QString> meaning;
+    qint64 explained = 0, total = 0;
+    int i = 0;
+    std::vector<Row> rows;
+    for (const TItem& it : tl_.rows) {
+        const Decoded d = proto_.decode(project_, it, tl_);
+        meaning.push_back(d.sentence);
+        total += d.total;
+        explained += d.explained;
+        ++i;
+    }
+    rows_->setMeaningShown(true);
+    for (size_t k = 0; k < meaning.size(); ++k) {
+        const Event& e = tl_.event(project_, tl_.rows[k]);
+        const_cast<Row&>(rows_->row(int(k))).decodable = e.kind == QLatin1String("data") || (e.kind == QLatin1String("usb") && !e.str("setup").isEmpty());
+    }
+    rows_->setMeanings(meaning);
+    rowView_->setColumnWidth(2, 260);
+    rowView_->setColumnWidth(3, 420);
+    const QString cov = QStringLiteral("<br><b>%1</b>: %2 % of the bytes explained").arg(proto_.name.toHtmlEscaped()).arg(total ? 100.0 * explained / total : 0, 0, 'f', 1);
+    QString info = tlInfo_->text();
+    const int at = info.indexOf(QStringLiteral("<br><b>"));
+    if (at >= 0) info.truncate(at);
+    tlInfo_->setText(info + cov);
+}
+
+void MainWindow::openCompare(int a, int b) {
+    if (project_.sessions.empty()) return;
+    auto* d = new CompareDialog(project_, tl_, this);
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    const int n = int(tl_.marks.size());
+    d->setMoments(std::clamp(a, 0, n), std::clamp(b, 0, n));
+    d->show();
+}
+
+void MainWindow::showExchanges() {
+    if (project_.sessions.empty()) return;
+    showReport(this, QStringLiteral("Questions and answers"), exchangesHtml(exchanges(messages(project_, tl_)), tl_.start), QStringLiteral("exchanges"));
+}
+
+void MainWindow::showHints() {
+    if (project_.sessions.empty()) return;
+    showReport(this, QStringLiteral("Clues per kind of message"), hintsHtml(hints(messages(project_, tl_), tl_)), QStringLiteral("hints"));
+}
+
+bool MainWindow::openDemo(const QString& which) {
+    QStringList dirs{qEnvironmentVariable("LIBRETAP_EXAMPLES"), QCoreApplication::applicationDirPath() + QStringLiteral("/../share/libretap/examples"),
+                     QCoreApplication::applicationDirPath() + QStringLiteral("/examples"), QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/examples"),
+                     QStringLiteral(LIBRETAP_SOURCE_EXAMPLES)};
+    for (const QString& d : dirs) {
+        const QString base = QDir(d).filePath(which);
+        if (d.isEmpty() || !QFileInfo::exists(base + QStringLiteral("/demo/project.json"))) continue;
+        if (!openRecording(base + QStringLiteral("/demo"))) return false;
+        const QString proto = base + QLatin1Char('/') + which + QStringLiteral(".protocol.json");
+        if (QFileInfo::exists(proto)) loadProtocol(proto);
+        return true;
+    }
+    QMessageBox::warning(this, QStringLiteral("Demo"), QStringLiteral("The %1 example is not installed.").arg(which));
+    return false;
 }
 
 bool MainWindow::addSession(const QString& folder) {

@@ -1,0 +1,16 @@
+{
+  "format": "libretap-project",
+  "version": 1,
+  "name": "Cora 5000 demo",
+  "clock": "project_time = t + offset + drift * (t - t0), per session",
+  "sessions": [
+    {
+      "path": "20261120-093602-cora",
+      "offset": 0,
+      "drift": 0,
+      "t0": 1795163771.694054,
+      "how": "reference",
+      "match": {}
+    }
+  ]
+}

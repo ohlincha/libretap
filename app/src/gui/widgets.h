@@ -15,6 +15,8 @@ struct Row {
     double t = 0;                  // project time (or wall time while recording)
     QString kind, who, text, hex;
     int dir = -1;
+    QString meaning;               // from a protocol description; empty: not explained
+    bool decodable = false;        // a message a description could explain
 };
 
 // Time | Who | Text | Hex. Marks and syncs are rows of their own, tinted.
@@ -27,7 +29,12 @@ public:
     void clear();
     const Row& row(int i) const { return rows_[size_t(i)]; }
     int rowCount(const QModelIndex& = {}) const override { return int(rows_.size()); }
-    int columnCount(const QModelIndex& = {}) const override { return 4; }
+    int columnCount(const QModelIndex& = {}) const override { return meaning_ ? 5 : 4; }
+    void setMeaningShown(bool on) { beginResetModel(); meaning_ = on; endResetModel(); }
+    void setMeanings(const std::vector<QString>& m) {
+        for (size_t i = 0; i < rows_.size() && i < m.size(); ++i) rows_[i].meaning = m[i];
+        emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
+    }
     QVariant data(const QModelIndex& i, int role) const override;
     QVariant headerData(int section, Qt::Orientation o, int role) const override;
     void setT0(double t0) { t0_ = t0; }
@@ -35,6 +42,8 @@ public:
 private:
     std::vector<Row> rows_;
     double t0_ = 0;
+    bool meaning_ = false;
+    int col(int c) const { return meaning_ || c < 3 ? c : c + 1; }   // 0 time, 1 who, 2 text, 3 meaning, 4 hex
 };
 
 Row rowFromEvent(const QJsonObject& e, const QJsonObject& sources);   // a live event

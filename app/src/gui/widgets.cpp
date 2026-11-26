@@ -48,23 +48,31 @@ void RowModel::clear() { setRows({}, t0_); }
 QVariant RowModel::data(const QModelIndex& i, int role) const {
     const Row& r = rows_[size_t(i.row())];
     const bool flag = r.kind == QLatin1String("mark") || r.kind == QLatin1String("sync");
+    const int c = col(i.column());
     if (role == Qt::DisplayRole) {
-        switch (i.column()) {
+        switch (c) {
         case 0: return clockText(r.t - t0_);
         case 1: return r.who;
         case 2: return r.text;
-        case 3: return r.hex;
+        case 3: return r.meaning.isEmpty() && r.decodable ? QStringLiteral("not explained yet") : r.meaning;
+        case 4: return r.hex;
         }
     }
-    if (role == Qt::ToolTipRole && i.column() >= 2) return i.column() == 2 ? r.text : r.hex;
-    if (role == Qt::FontRole && (i.column() >= 2 || i.column() == 0) && !flag) return QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    if (role == Qt::ToolTipRole && c >= 2) return c == 2 ? r.text : c == 3 ? r.meaning : r.hex;
+    if (role == Qt::ForegroundRole && c == 3 && r.meaning.isEmpty()) return theme::warn();
+    if (role == Qt::FontRole && c == 3 && r.meaning.isEmpty()) {
+        QFont f;
+        f.setItalic(true);
+        return f;
+    }
+    if (role == Qt::FontRole && (c == 2 || c == 4 || c == 0) && !flag) return QFontDatabase::systemFont(QFontDatabase::FixedFont);
     if (role == Qt::FontRole && flag) {
         QFont f;
         f.setBold(true);
         return f;
     }
-    if (role == Qt::ForegroundRole && i.column() == 1 && r.dir >= 0) return r.dir == 0 ? kPc : kInstr;
-    if (role == Qt::ForegroundRole && i.column() == 0) return theme::dim();
+    if (role == Qt::ForegroundRole && c == 1 && r.dir >= 0) return r.dir == 0 ? kPc : kInstr;
+    if (role == Qt::ForegroundRole && c == 0) return theme::dim();
     if (role == Qt::BackgroundRole && flag) {
         QColor c = r.kind == QLatin1String("mark") ? kMark : kSync;
         c.setAlpha(theme::isDark() ? 50 : 40);
@@ -76,8 +84,8 @@ QVariant RowModel::data(const QModelIndex& i, int role) const {
 
 QVariant RowModel::headerData(int s, Qt::Orientation o, int role) const {
     if (o != Qt::Horizontal || role != Qt::DisplayRole) return {};
-    static const char* const h[] = {"Time", "Who", "What was sent (text)", "Bytes (hex)"};
-    return QString::fromLatin1(h[s]);
+    static const char* const h[] = {"Time", "Who", "What was sent (text)", "Meaning", "Bytes (hex)"};
+    return QString::fromLatin1(h[col(s)]);
 }
 
 Row rowFromEvent(const QJsonObject& e, const QJsonObject& names) {

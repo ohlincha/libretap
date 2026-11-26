@@ -546,7 +546,8 @@ std::vector<CameraInfo> Camera::list(bool withDemo) {
     }
     const QString ff = qEnvironmentVariable("LIBRETAP_FFMPEG_CAMERA");   // testing: any ffmpeg input, e.g. lavfi:testsrc2
     if (!ff.isEmpty()) out.push_back({QStringLiteral("ffmpeg:") + ff, QStringLiteral("ffmpeg: %1").arg(ff)});
-    if (withDemo) out.push_back({QStringLiteral("demo"), QStringLiteral("Demo camera (a pretend instrument PC)")});
+    if (withDemo || qEnvironmentVariableIntValue("LIBRETAP_DEMO_CAMERA"))   // screenshots: the pretend PC as a camera
+        out.push_back({QStringLiteral("demo"), QStringLiteral("Demo camera (a pretend instrument PC)")});
     return out;
 }
 

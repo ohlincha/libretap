@@ -63,9 +63,9 @@ inline QByteArray block(quint32 type, const QByteArray& body) {
     return le32(type) + le32(len) + b + le32(len);
 }
 
-inline QByteArray pcapng(const std::vector<Frame>& frames, bool nanos = false) {
+inline QByteArray pcapng(const std::vector<Frame>& frames, bool nanos = false, int linktype = 1) {
     QByteArray out = block(0x0A0D0D0A, le32(0x1A2B3C4D) + le16(1) + le16(0) + le32(0xFFFFFFFF) + le32(0xFFFFFFFF));
-    QByteArray idb = le16(1) + le16(0) + le32(65535);
+    QByteArray idb = le16(linktype) + le16(0) + le32(65535);
     if (nanos) idb += le16(9) + le16(1) + QByteArray(1, char(9)) + QByteArray(3, 0) + le16(0) + le16(0);   // if_tsresol = 9 (ns)
     out += block(1, idb);
     for (const Frame& f : frames) {
@@ -115,4 +115,15 @@ inline bool save(const QString& path, const QByteArray& bytes) {
     return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size();
 }
 
+}  // namespace pcapgen
+
+namespace pcapgen {
+// USBPcap packets (link type 249): header, then for control transfers the stage, then data.
+inline QByteArray usbpcap(quint64 irp, bool fromDevice, int dev, int ep, int transfer, const QByteArray& data, int stage = -1, quint32 status = 0) {
+    QByteArray h = le16(transfer == 2 ? 28 : 27);
+    h += le32(quint32(irp)) + le32(quint32(irp >> 32)) + le32(status) + le16(0) + QByteArray(1, char(fromDevice ? 1 : 0)) + le16(1) + le16(dev) +
+         QByteArray(1, char(ep)) + QByteArray(1, char(transfer)) + le32(quint32(data.size()));
+    if (transfer == 2) h += char(stage);
+    return h + data;
+}
 }  // namespace pcapgen

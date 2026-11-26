@@ -79,7 +79,8 @@ RowText describe(const Project& p, const TItem& i) {
                 const QString conn = e.str("conn"), port = conn.section(QLatin1Char(':'), -1);
                 r.who += QStringLiteral(" (%1 %2)").arg(e.str("proto").toUpper(), port);
             }
-        } else if (src.value(QStringLiteral("kind")).toString() == QLatin1String("usb-pico")) {
+        } else if (src.value(QStringLiteral("kind")).toString() == QLatin1String("usb-pico") ||
+                   src.value(QStringLiteral("kind")).toString() == QLatin1String("usbpcap")) {
             r.dir = dir == QLatin1String("out") ? 0 : 1;
             r.who = (r.dir == 0 ? QStringLiteral("PC → Instrument") : QStringLiteral("Instrument → PC")) +
                     QStringLiteral(" (USB ep %1)").arg(e.o.value(QStringLiteral("ep")).toInt());

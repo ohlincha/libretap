@@ -12,6 +12,7 @@
 
 #include "core/camerasource.h"
 #include "core/devices.h"
+#include "core/protocol.h"
 #include "core/project.h"
 #include "core/recorder.h"
 #include "core/timeline.h"
@@ -47,6 +48,11 @@ public:
     void showTimelinePage();
     void setTimelineTime(double t);
     Recorder& recorder() { return rec_; }
+    bool loadProtocol(const QString& path);     // a protocol description: the Meaning column and coverage
+    void openCompare(int a = 0, int b = 1);     // marks by index; the last entry is the end
+    void showExchanges();
+    void showHints();
+    bool openDemo(const QString& which);        // "cora": the bundled Cora 5000 example with its description
     const Project& project() const { return project_; }
     QString controlProblem() const { return controlProblem_; }
 
@@ -110,6 +116,9 @@ private:
     RowModel* rows_ = nullptr;
     QTableView* rowView_ = nullptr;
     bool syncingSelection_ = false;
+    Protocol proto_;
+    bool protoLoaded_ = false;
+    void applyProtocol();
 };
 
 }  // namespace lt::gui

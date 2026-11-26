@@ -10,6 +10,8 @@ instrument.
 
 ![Timeline](app/docs/timeline-with-tick-light.png)
 
+![Compare two moments](app/docs/cora-compare-light.png)
+
 - **Serial tap**: a passive two-lead DB-9 tap and two USB-serial adapters (one per direction). The adapters only
   listen; nothing is ever sent.
 - **USB sniffer**: a Raspberry Pi Pico with usb-sniffer-lite spliced into the instrument's USB cable (low/full
@@ -21,10 +23,20 @@ instrument.
 - **Tick**: a small companion program for the old PC itself (Windows 2000 to 11, separate project) records the
   screen and the vendor program's port calls in the same format. *Add Tick session…* combines its folder with
   LibreTap's recording; the clocks are lined up automatically from the traffic both saw, or with the Sync button.
+- **USBPcap import**: a Wireshark/USBPcap capture made on the instrument PC, only the chosen devices (keyboards
+  and USB sticks stay out).
 - **Marks**: press Mark (space bar) and say what you are about to change; marks appear on the timeline.
 - **Agents**: everything works from the command line, also against the running window:
   `LibreTapCLI status | start | mark "note" | sync | stop | ports | sessions | show | match | import`, all with
   `--json`.
+- **Analysis** (the second half): questions and answers with repeats folded, compare two moments byte by byte,
+  clues per kind of message (framing, length fields, checksum and CRC candidates, values that follow the marks),
+  key frames of the screen, an export for an assistant, and **protocol descriptions** (a small JSON file per
+  instrument, [docs/PROTOCOL-FORMAT.md](docs/PROTOCOL-FORMAT.md)) that turn each message into a sentence and show
+  how much is explained. All in the window (Analyze) and on the command line.
+- **For AI assistants**: [AGENTS.md](AGENTS.md) — commands, workflow with the operator, safety rules.
+- **Cora 5000 example**: `LibreTap --demo cora` opens a real (filtered) recording of an Anton Paar Cora 5000 Raman
+  spectrometer's vendor software with its protocol description (95 % of the bytes explained).
 - **Demo**: no hardware? `LibreTap --demo` (or Help ▸ Try the demo) records a pretend instrument.
 
 **Status: version 0.1, untested on real hardware.** Tested with pseudo-terminals, a simulated Pico, synthetic
