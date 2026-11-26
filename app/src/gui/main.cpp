@@ -8,6 +8,7 @@
 //   LIBRETAP_SHOT_MARKS="1.5:note;2.5:note" marks at those seconds
 //   LIBRETAP_SHOT_ADD=folder               add that session (e.g. a Tick session) to the opened recording
 //   LIBRETAP_SHOT_TIME=seconds             move the timeline to that time after the start
+//   LIBRETAP_SHOT_SIZE=WxH                 window size
 #include <QApplication>
 #include <QTimer>
 
@@ -40,6 +41,8 @@ int main(int argc, char** argv) {
     MainWindow w;
     const QStringList args = app.arguments();
     QTimer::singleShot(1200, &w, [&] {
+        if (const QString sz = qEnvironmentVariable("LIBRETAP_SHOT_SIZE"); !sz.isEmpty())   // testing: WxH
+            w.resize(sz.section(QLatin1Char('x'), 0, 0).toInt(), sz.section(QLatin1Char('x'), 1, 1).toInt());
         w.show();
         splash.finish(&w);
         if (args.contains(QStringLiteral("--demo"))) w.setDemo(true);

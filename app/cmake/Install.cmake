@@ -1,4 +1,7 @@
 # Installation and packages: Linux .deb (CPack), macOS app bundle, Windows folder (+ Inno Setup in CI).
+# Ethernet capture uses Wireshark's dumpcap: the .deb depends on it and sets up capture permission for the installing
+# user (postinst); the Windows installer offers to install Wireshark (with Npcap); on macOS the user installs
+# Wireshark with ChmodBPF (README).
 # ffmpeg drives the camera on Windows (DirectShow) and macOS (AVFoundation) and is shipped there; on Linux the
 # camera is read directly (V4L2) and ffmpeg is a dependency of the .deb for other cameras and inputs.
 include(GNUInstallDirs)
@@ -67,7 +70,11 @@ else()
   set(CPACK_DEBIAN_PACKAGE_SECTION science)
   set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
   set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "ffmpeg")   # added to the libraries' dependencies found by SHLIBDEPS
+  # ffmpeg: cameras; wireshark-common: dumpcap for Ethernet capture (the postinst lets the installing user capture,
+  # see packaging/linux/postinst and the README); libcap2-bin: setcap
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "ffmpeg, wireshark-common, libcap2-bin")
+  set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA ${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/postinst)
+  set(CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION ON)
   set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qt6-wayland, v4l-utils")
   include(CPack)
 endif()

@@ -17,6 +17,9 @@
 #include "core/camerasource.h"
 #include "core/control.h"
 #include "core/devices.h"
+#include "core/ethernet.h"
+#include "core/pcap.h"
+#include "core/usbpico.h"
 #include "core/match.h"
 #include "core/project.h"
 #include "core/recorder.h"
@@ -32,7 +35,9 @@ const char* const kUsage = R"(LibreTapCLI — record what old vendor software sa
 
   LibreTapCLI record [--a PORT --b PORT] [--baud N|auto] [--format 8N1] [--gap MS] [--names PC INSTR]
                      [--camera ID|auto|none] [--every S] [--demo] [--out DIR] [--name NAME] [--note TEXT]
+                     [--usb-pico PORT [--usb-speed full|low]] [--ethernet IFACE|auto [--instrument-ip IP]]
                      [--seconds S]           record until `stop`, Ctrl-C or --seconds (no window needed)
+                                             (the tap is used when --a/--b are given, or when nothing else is)
   LibreTapCLI status                         the running LibreTap (window or record): recording? counts
   LibreTapCLI start                          start recording in the running window (its connections)
   LibreTapCLI mark [NOTE]                    mark this moment (what you are about to change)
@@ -44,6 +49,8 @@ const char* const kUsage = R"(LibreTapCLI — record what old vendor software sa
   LibreTapCLI show REC [--hex] [--frames]    a recording as text (REC: folder, name, or "latest")
   LibreTapCLI match A B [--save]             clock offset and drift of session B against session A
   LibreTapCLI import REC SESSION             add a session folder (e.g. from Tick) to a recording and match it
+  LibreTapCLI decode-usb DUMP [--low] [--ftdi]   decode a usb-sniffer-lite text dump into transfers
+  LibreTapCLI pcap FILE [--ip IP]            a pcap/pcapng file as conversations and packet summaries
 
 Add --json to any command for JSON output. The window and `record` listen on a local socket (libretap-<user>,
 or $LIBRETAP_CONTROL), so status/start/mark/sync/stop reach whichever is running.
@@ -118,11 +125,22 @@ int cmdRecord(const QStringList& args) {
                   {QStringLiteral("note"), QStringLiteral("session note"), QStringLiteral("text")},
                   {QStringLiteral("seconds"), QStringLiteral("stop after"), QStringLiteral("s")},
                   {QStringLiteral("hex"), QStringLiteral("hex under each chunk")},
+                  {QStringLiteral("usb-pico"), QStringLiteral("the Pico USB sniffer's port"), QStringLiteral("port")},
+                  {QStringLiteral("usb-speed"), QStringLiteral("full or low"), QStringLiteral("speed"), QStringLiteral("full")},
+                  {QStringLiteral("ethernet"), QStringLiteral("network interface or auto"), QStringLiteral("iface")},
+                  {QStringLiteral("instrument-ip"), QStringLiteral("only traffic to/from this address"), QStringLiteral("ip")},
                   {QStringLiteral("json"), QStringLiteral("JSON")}});
     if (!p.parse(QStringList{QStringLiteral("record")} + args)) return fail(p.errorText(), 2);
     RecordOptions o;
     o.demo = p.isSet(QStringLiteral("demo"));
-    o.tap = !p.isSet(QStringLiteral("no-tap"));
+    o.usb = p.isSet(QStringLiteral("usb-pico"));
+    o.pico.port = p.value(QStringLiteral("usb-pico"));
+    o.pico.lowSpeed = p.value(QStringLiteral("usb-speed")) == QLatin1String("low");
+    o.ethernet = p.isSet(QStringLiteral("ethernet"));
+    o.eth.iface = p.value(QStringLiteral("ethernet")) == QLatin1String("auto") ? QString() : p.value(QStringLiteral("ethernet"));
+    o.eth.instrumentIp = p.value(QStringLiteral("instrument-ip"));
+    // the serial tap: when its ports are given, or when nothing else is asked for
+    o.tap = !p.isSet(QStringLiteral("no-tap")) && (p.isSet(QStringLiteral("a")) || (!o.usb && !o.ethernet));
     o.workspace = p.value(QStringLiteral("out"));
     o.name = p.value(QStringLiteral("name"));
     o.note = p.value(QStringLiteral("note"));
@@ -134,6 +152,11 @@ int cmdRecord(const QStringList& args) {
         const QStringList n = p.value(QStringLiteral("names")).split(QLatin1Char(','));
         if (n.size() != 2) return fail(QStringLiteral("--names PC,INSTR"), 2);
         tc.nameA = n[0], tc.nameB = n[1];
+    }
+    if (o.usb && o.pico.port == QLatin1String("auto")) {
+        const auto picos = listPicos();
+        if (picos.empty()) return fail(QStringLiteral("no USB sniffer (Pico) found"));
+        o.pico.port = picos.front().path;
     }
     if (o.tap && !o.demo) {
         const TapGuess g = guessTap(listAdapters());
@@ -204,8 +227,10 @@ int cmdRecord(const QStringList& args) {
         out(QStringLiteral("recording into %1\n%2\nmark: LibreTapCLI mark \"note\"   sync: LibreTapCLI sync   stop: LibreTapCLI stop (or Ctrl-C)")
                 .arg(rec.projectFolder(),
                      o.demo ? QStringLiteral("demo instrument")
-                            : o.tap ? QStringLiteral("PC side %1, instrument side %2, %3 baud %4").arg(tc.portA, tc.portB).arg(tc.line.baud).arg(tc.line.text())
-                                    : QStringLiteral("camera only")));
+                            : QStringList{o.tap ? QStringLiteral("serial tap: PC side %1, instrument side %2, %3 baud %4").arg(tc.portA, tc.portB).arg(tc.line.baud).arg(tc.line.text()) : QString(),
+                                          o.usb ? QStringLiteral("USB sniffer on %1 (one capture: do one action, then stop)").arg(o.pico.port) : QString(),
+                                          o.ethernet ? QStringLiteral("network on %1").arg(o.eth.iface.isEmpty() ? QStringLiteral("(auto)") : o.eth.iface) : QString()}
+                                  .filter(QRegularExpression(QStringLiteral("."))).join(QStringLiteral("; "))));
     headerDone = true;
     for (const QJsonObject& e : early) print(e);
     std::signal(SIGINT, onSignal);
@@ -233,6 +258,79 @@ int cmdRecord(const QStringList& args) {
                 .arg(s.value(QStringLiteral("bytes_a")).toInt()).arg(s.value(QStringLiteral("bytes_b")).toInt())
                 .arg(s.value(QStringLiteral("marks")).toInt()).arg(s.value(QStringLiteral("stills")).toInt()).arg(rec.projectFolder()));
     }
+    return 0;
+}
+
+int cmdDecodeUsb(const QStringList& args) {
+    QString path;
+    bool low = false, ftdi = false;
+    for (const QString& a : args) {
+        if (a == QLatin1String("--low")) low = true;
+        else if (a == QLatin1String("--ftdi")) ftdi = true;
+        else path = a;
+    }
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return fail(QStringLiteral("cannot read %1").arg(path), 2);
+    const QString text = QString::fromLatin1(f.readAll());
+    UsbDecoder d(low || text.contains(QLatin1String("Capture speed       : Low")), ftdi);
+    d.feed(text);
+    if (gJson) {
+        QJsonArray evs;
+        for (const UsbEvent& e : d.events) {
+            QJsonObject o{{QStringLiteral("t_ms"), e.tMs}, {QStringLiteral("what"), e.what}};
+            if (e.addr >= 0) o.insert(QStringLiteral("addr"), e.addr);
+            if (e.ep >= 0) o.insert(QStringLiteral("ep"), e.ep);
+            if (!e.dir.isEmpty()) o.insert(QStringLiteral("dir"), e.dir);
+            if (!e.data.isEmpty()) o.insert(QStringLiteral("hex"), QString::fromLatin1(e.data.toHex()));
+            evs.append(o);
+        }
+        outJson({{QStringLiteral("ok"), true}, {QStringLiteral("events"), evs}, {QStringLiteral("summary"), QJsonArray::fromStringList(d.summary())}});
+        return 0;
+    }
+    for (const UsbEvent& e : d.events) {
+        QString s = QStringLiteral("%1 ms  dev %2 ep%3 %4  %5").arg(e.tMs, 11, 'f', 3).arg(e.addr >= 0 ? QString::number(e.addr) : QStringLiteral("-"), -3)
+                        .arg(e.ep >= 0 ? QString::number(e.ep) : QStringLiteral("-"), -2).arg(e.dir, -3).arg(e.what);
+        if (!e.data.isEmpty() && !e.control) s += QStringLiteral("  ") + textView(e.data);
+        out(s);
+        if (!e.data.isEmpty() && e.control) out(QStringLiteral("%1%2").arg(QString(17, QLatin1Char(' ')), hexView(e.data)));
+    }
+    for (const QString& l : d.summary()) out(l);
+    return 0;
+}
+
+int cmdPcap(const QStringList& args) {
+    QString path, ip;
+    for (int i = 0; i < args.size(); ++i) {
+        if (args[i] == QLatin1String("--ip") && i + 1 < args.size()) ip = args[++i];
+        else path = args[i];
+    }
+    std::vector<Packet> packets;
+    QString err;
+    if (!PcapReader::readFile(path, &packets, &err)) return fail(err, 2);
+    NetFlows f(ip);
+    for (const Packet& p : packets) f.add(p);
+    f.flush();
+    const auto evs = f.take();
+    const double t0 = packets.empty() ? 0 : packets.front().t;
+    if (gJson) {
+        QJsonArray arr;
+        for (const auto& e : evs) {
+            QJsonObject o = e.fields;
+            o.insert(QStringLiteral("t"), e.t);
+            o.insert(QStringLiteral("kind"), e.kind);
+            arr.append(o);
+        }
+        outJson({{QStringLiteral("ok"), true}, {QStringLiteral("events"), arr}, {QStringLiteral("stats"), f.stats()}});
+        return 0;
+    }
+    for (const auto& e : evs) {
+        if (e.kind == QLatin1String("data"))
+            out(QStringLiteral("%1  %2  %3  %4").arg(clockText(e.t - t0), 11).arg(e.fields.value(QStringLiteral("dir")).toString() == QLatin1String("a") ? QStringLiteral("PC>INSTR") : QStringLiteral("INSTR>PC"))
+                    .arg(e.fields.value(QStringLiteral("proto")).toString().toUpper(), textView(QByteArray::fromHex(e.fields.value(QStringLiteral("hex")).toString().toLatin1()))));
+        else
+            out(QStringLiteral("%1  %2").arg(clockText(e.t - t0), 11).arg(e.fields.value(QStringLiteral("text")).toString()));
+    }
+    out(QString::fromUtf8(QJsonDocument(f.stats()).toJson(QJsonDocument::Compact)));
     return 0;
 }
 
@@ -286,6 +384,10 @@ int cmdPorts(bool all) {
         out(QStringLiteral("  serial  %1  %2").arg(a.toObject().value(QStringLiteral("path")).toString(), a.toObject().value(QStringLiteral("label")).toString()));
     for (const QJsonValue& a : c.value(QStringLiteral("cameras")).toArray())
         out(QStringLiteral("  camera  %1  %2").arg(a.toObject().value(QStringLiteral("id")).toString(), a.toObject().value(QStringLiteral("name")).toString()));
+    for (const QJsonValue& a : c.value(QStringLiteral("usb_sniffers")).toArray())
+        out(QStringLiteral("  usb     %1  USB sniffer (Pico)").arg(a.toObject().value(QStringLiteral("path")).toString()));
+    for (const QJsonValue& a : c.value(QStringLiteral("interfaces")).toArray())
+        out(QStringLiteral("  network %1").arg(a.toObject().value(QStringLiteral("label")).toString()));
     return 0;
 }
 
@@ -550,5 +652,7 @@ int main(int argc, char** argv) {
     if (cmd == QLatin1String("show")) return cmdShow(raw);
     if (cmd == QLatin1String("match")) return cmdMatch(raw);
     if (cmd == QLatin1String("import")) return cmdImport(raw);
+    if (cmd == QLatin1String("decode-usb")) return cmdDecodeUsb(raw);
+    if (cmd == QLatin1String("pcap")) return cmdPcap(raw);
     return fail(QStringLiteral("unknown command %1; LibreTapCLI help").arg(cmd), 2);
 }

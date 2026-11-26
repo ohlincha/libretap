@@ -75,6 +75,14 @@ RowText describe(const Project& p, const TItem& i) {
             const QString bn = names.value(QStringLiteral("b")).toString(QStringLiteral("Instrument"));
             r.dir = dir == QLatin1String("a") ? 0 : 1;
             r.who = r.dir == 0 ? a + QStringLiteral(" → ") + bn : bn + QStringLiteral(" → ") + a;
+            if (src.value(QStringLiteral("kind")).toString() == QLatin1String("ethernet")) {   // which conversation
+                const QString conn = e.str("conn"), port = conn.section(QLatin1Char(':'), -1);
+                r.who += QStringLiteral(" (%1 %2)").arg(e.str("proto").toUpper(), port);
+            }
+        } else if (src.value(QStringLiteral("kind")).toString() == QLatin1String("usb-pico")) {
+            r.dir = dir == QLatin1String("out") ? 0 : 1;
+            r.who = (r.dir == 0 ? QStringLiteral("PC → Instrument") : QStringLiteral("Instrument → PC")) +
+                    QStringLiteral(" (USB ep %1)").arg(e.o.value(QStringLiteral("ep")).toInt());
         } else {
             QString label = src.value(QStringLiteral("label")).toString(e.src);
             if (const int k = label.indexOf(QStringLiteral(" (")); k > 0) label = label.left(k);   // "COM1 (VENDOR.EXE)" → COM1
@@ -109,6 +117,13 @@ RowText describe(const Project& p, const TItem& i) {
         r.who = e.str("call");
         r.text = e.src + QStringLiteral(" ") + e.str("code");
         r.hex = e.str("in");
+    } else if (e.kind == QLatin1String("usb")) {
+        r.who = QStringLiteral("USB");
+        r.text = e.str("what");
+        r.hex = hexView(e.bytes());
+    } else if (e.kind == QLatin1String("packet")) {
+        r.who = QStringLiteral("Network");
+        r.text = e.str("text");
     } else if (e.kind == QLatin1String("error")) {
         r.who = QStringLiteral("Problem");
         r.text = e.str("text");

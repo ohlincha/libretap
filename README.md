@@ -12,6 +12,11 @@ instrument.
 
 - **Serial tap**: a passive two-lead DB-9 tap and two USB-serial adapters (one per direction). The adapters only
   listen; nothing is ever sent.
+- **USB sniffer**: a Raspberry Pi Pico with usb-sniffer-lite spliced into the instrument's USB cable (low/full
+  speed). It captures in short pieces: press Record, do one action, press Stop. Control requests are named
+  (descriptors, CDC, FTDI/CH34x/PL2303/CP210x), data is shown per endpoint.
+- **Ethernet**: a switch with port mirroring (e.g. TP-Link TL-SG105E) copies the instrument's and the PC's traffic to
+  the laptop; Wireshark's dumpcap captures it, LibreTap shows the TCP/UDP conversations like serial traffic.
 - **Camera**: a full-resolution still of the instrument PC's screen every half second (only when it changes).
 - **Tick**: a small companion program for the old PC itself (Windows 2000 to 11, separate project) records the
   screen and the vendor program's port calls in the same format. *Add Tick session…* combines its folder with
@@ -22,14 +27,34 @@ instrument.
   `--json`.
 - **Demo**: no hardware? `LibreTap --demo` (or Help ▸ Try the demo) records a pretend instrument.
 
-USB (Raspberry Pi Pico sniffer) and Ethernet (port mirroring) are planned.
+**Status: version 0.1, untested on real hardware.** Tested with pseudo-terminals, a simulated Pico, synthetic
+network captures and a stand-in dumpcap, simulated cameras, and real Tick sessions recorded under Wine; Windows and
+macOS builds and the installers' permission steps are set up in CI but not yet run.
 
-**Status: version 0.1, untested on real hardware.** Tested with pseudo-terminals, simulated cameras and simulated
-Tick sessions only; Windows and macOS builds are set up in CI but not yet run.
+## What the installers change on your system
+
+Capturing network traffic needs permission, so the installers set it up (this changes system settings):
+
+- **Linux (.deb)**: depends on `wireshark-common` (dumpcap) and `ffmpeg`. Its post-install script does what
+  answering "Yes" to Wireshark's "allow non-superusers to capture packets?" does: a `wireshark` group, dumpcap
+  runnable by that group with the network-capture capabilities (`cap_net_raw,cap_net_admin`), and the user who ran
+  the installation (via sudo or pkexec) added to the group. Until that user logs in again, LibreTap starts dumpcap
+  through `sg wireshark`. Undo: `sudo dpkg-reconfigure wireshark-common` (answer No) and
+  `sudo gpasswd -d $USER wireshark`. If it could not be set up, the Connections area says so with the one command
+  that fixes it.
+- **Windows**: Npcap (the capture driver) may not be bundled under its licence. The installer offers, checked when
+  Wireshark is missing, to download Wireshark's official installer from wireshark.org, which installs dumpcap and
+  offers Npcap; you click through it (it asks for administrator rights). LibreTap itself installs per user.
+- **macOS**: nothing is changed. For Ethernet capture install Wireshark including its "ChmodBPF" part (it gives your
+  user access to the capture devices); the Connections area tells you when it is missing.
+
+The serial tap and the USB sniffer need no special rights on Windows and macOS; on Linux your user must be in the
+`dialout` group (most desktop distributions do this for the first user).
 
 ## Build
 
-Qt 6.5+ (Core, Gui, Widgets, SerialPort, Network), CMake, a C++17 compiler; ffmpeg for cameras on Windows/macOS.
+Qt 6.5+ (Core, Gui, Widgets, SerialPort, Network), CMake, a C++17 compiler; ffmpeg for cameras on Windows/macOS;
+Wireshark's dumpcap for Ethernet capture (pcap/pcapng files are read by LibreTap itself).
 
 ```
 cmake -S app -B build -G Ninja -DCMAKE_BUILD_TYPE=Release

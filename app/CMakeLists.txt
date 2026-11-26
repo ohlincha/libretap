@@ -63,10 +63,10 @@ foreach(src ${TEST_SOURCES})
   if(name STREQUAL "test_gui")
     target_link_libraries(${name} PRIVATE libretap_gui)
   endif()
-  if(name STREQUAL "test_serialtap")
+  if(name STREQUAL "test_serialtap" OR (name STREQUAL "test_usb" AND CMAKE_SYSTEM_NAME STREQUAL "Linux"))
     target_link_libraries(${name} PRIVATE util)
   endif()
-  target_compile_definitions(${name} PRIVATE CLI_PATH="$<TARGET_FILE:libretap-cli>")
+  target_compile_definitions(${name} PRIVATE CLI_PATH="$<TARGET_FILE:libretap-cli>" TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
   add_test(NAME ${name} COMMAND ${name})
   # never a real camera in tests (the developer's own webcam); a private control socket per test run
   set_tests_properties(${name} PROPERTIES ENVIRONMENT

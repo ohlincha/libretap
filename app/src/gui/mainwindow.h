@@ -63,6 +63,7 @@ private:
     void advancedDialog();
     void clocksDialog();
     void findSpeed();
+    void switchHelp();
     void addTickDialog();
     void reloadTimeline(double keepTime = -1);
     void showPicture();
@@ -84,6 +85,11 @@ private:
     QLabel *tapDot_ = nullptr, *tapText_ = nullptr, *camDot_ = nullptr, *camText_ = nullptr, *speedText_ = nullptr;
     QPushButton *swap_ = nullptr, *speed_ = nullptr, *advanced_ = nullptr, *demoButton_ = nullptr;
     QCheckBox* useCamera_ = nullptr;
+    QLabel *usbDot_ = nullptr, *usbText_ = nullptr, *ethDot_ = nullptr, *ethText_ = nullptr;
+    QCheckBox *useUsb_ = nullptr, *useEth_ = nullptr;
+    QComboBox* ifaceBox_ = nullptr;
+    QPushButton* switchHelp_ = nullptr;
+    QString picoPort_;               // the Pico found, if any
     QComboBox* cameraBox_ = nullptr;
     QPushButton *record_ = nullptr, *mark_ = nullptr, *sync_ = nullptr;
     QLineEdit* note_ = nullptr;

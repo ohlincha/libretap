@@ -52,6 +52,10 @@ jobs:
         run: |
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ./dist/*.deb
           dpkg -s libretap | grep -E '^(Version|Depends|Recommends):'
+          # the postinst's capture permission (as root there is no installing user to add to the group)
+          getent group wireshark
+          stat -c '%U:%G %a' /usr/bin/dumpcap
+          getcap /usr/bin/dumpcap || true
           for f in /usr/bin/LibreTap /usr/bin/LibreTapCLI /usr/share/applications/io.github.ohlincha.libretap.desktop \
                    /usr/share/icons/hicolor/256x256/apps/io.github.ohlincha.libretap.png; do
             test -e "$f" || { echo "missing: $f"; exit 1; }

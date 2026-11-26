@@ -10,7 +10,9 @@
 #include <memory>
 #include <vector>
 
+#include "ethernet.h"
 #include "serialtap.h"
+#include "usbpico.h"
 #include "session.h"
 
 namespace lt {
@@ -22,6 +24,10 @@ struct RecordOptions {
     bool tap = true;               // record the serial tap
     TapConfig tapConfig;
     bool demo = false;             // the demo tap instead of real ports (demo.h)
+    bool usb = false;              // the Pico USB sniffer (usbpico.h): one capture per recording
+    PicoConfig pico;
+    bool ethernet = false;         // network capture with dumpcap (ethernet.h)
+    EthernetConfig eth;
     double stillEvery = 0.5;       // camera stills, seconds
     QString workspace;             // empty: workspaceDir()
     QString name;                  // added to the folder name

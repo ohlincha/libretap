@@ -22,6 +22,10 @@ struct Adapter {
     QJsonObject toJson() const;
 };
 
+// The Pico USB sniffers (usb-sniffer-lite: Raspberry Pi vendor id 2e8a, or "sniffer" in its name);
+// LIBRETAP_FAKE_PICO=path adds one (a pseudo-terminal in tests).
+std::vector<Adapter> listPicos();
+
 // USB-serial adapters (and fake ones); with all, also built-in and other serial ports.
 std::vector<Adapter> listAdapters(bool all = false);
 

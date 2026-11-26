@@ -1,0 +1,37 @@
+{"t":1795730201.868975,"kind":"status","text":"Tick started recording into C:\\shot\\TickSessions\\20261126-225641-tick\\"}
+{"t":1795730201.884640,"kind":"status","text":"Started C:\\shot\\fakevendor.exe (process 300) and listening to its serial ports"}
+{"t":1795730201.875176,"kind":"frame","src":"screen","file":"frames/000001.png","full":true,"x":0,"y":0,"w":1024,"h":768}
+{"t":1795730201.901021,"kind":"input","src":"input","what":"window","title":"Tick - LibreTap recorder"}
+{"t":1795730201.916947,"kind":"status","text":"TickHook active in C:\\shot\\fakevendor.exe: 19 import slots hooked"}
+{"t":1795730201.917197,"kind":"open","src":"com1","path":"\\\\.\\COM1","ok":true}
+{"t":1795730201.917236,"kind":"call","src":"com1","call":"SetupComm","in_queue":4096,"out_queue":4096}
+{"t":1795730201.917256,"kind":"config","src":"com1","call":"SetCommState","baud":9600,"bits":8,"parity":"N","stop":1,"rts":"on","dtr":"on"}
+{"t":1795730201.917302,"kind":"config","src":"com1","call":"SetCommTimeouts","timeouts":{"read_interval":50,"read_total_multiplier":0,"read_total_constant":200,"write_total_multiplier":0,"write_total_constant":500}}
+{"t":1795730201.917321,"kind":"config","src":"com1","call":"EscapeCommFunction","dtr":"on","ok":false}
+{"t":1795730201.917326,"kind":"call","src":"com1","call":"PurgeComm","flags":"0x0c"}
+{"t":1795730201.917402,"kind":"data","src":"com1","dir":"out","hex":"2a49444e3f20300d","call":"WriteFile","n":8}
+{"t":1795730201.967605,"kind":"data","src":"com1","dir":"in","hex":"5449434b544553542c2a49444e3f20300d0a","call":"ReadFile","n":18,"req":127}
+{"t":1795730202.370907,"kind":"frame","src":"screen","file":"frames/000002.png","full":false,"x":0,"y":0,"w":672,"h":448}
+{"t":1795730202.382903,"kind":"input","src":"input","what":"window","title":"C:\\shot\\fakevendor.exe"}
+{"t":1795730202.594784,"kind":"data","src":"com1","dir":"out","hex":"2a49444e3f20310d","call":"WriteFile","n":8}
+{"t":1795730202.644926,"kind":"data","src":"com1","dir":"in","hex":"5449434b544553542c2a49444e3f20310d0a","call":"ReadFile","n":18,"req":127}
+{"t":1795730202.871688,"kind":"frame","src":"screen","file":"frames/000003.png","full":false,"x":0,"y":32,"w":192,"h":32}
+{"t":1795730202.871688,"kind":"frame","src":"screen","file":"frames/000004.png","full":false,"x":0,"y":64,"w":32,"h":32}
+{"t":1795730202.949636,"kind":"data","src":"com1","dir":"out","hex":"2a49444e3f20320d","call":"WriteFile","n":8}
+{"t":1795730202.999778,"kind":"data","src":"com1","dir":"in","hex":"5449434b544553542c2a49444e3f20320d0a","call":"ReadFile","n":18,"req":127}
+{"t":1795730203.308999,"kind":"data","src":"com1","dir":"out","hex":"2a49444e3f20330d","call":"WriteFile","n":8}
+{"t":1795730203.359143,"kind":"data","src":"com1","dir":"in","hex":"5449434b544553542c2a49444e3f20330d0a","call":"ReadFile","n":18,"req":127}
+{"t":1795730203.372550,"kind":"frame","src":"screen","file":"frames/000005.png","full":false,"x":0,"y":64,"w":192,"h":32}
+{"t":1795730203.663492,"kind":"data","src":"com1","dir":"out","hex":"2a49444e3f20340d","call":"WriteFile","n":8}
+{"t":1795730203.713617,"kind":"data","src":"com1","dir":"in","hex":"5449434b544553542c2a49444e3f20340d0a","call":"ReadFile","n":18,"req":127}
+{"t":1795730203.873754,"kind":"frame","src":"screen","file":"frames/000006.png","full":false,"x":0,"y":64,"w":192,"h":64}
+{"t":1795730204.018136,"kind":"data","src":"com1","dir":"out","hex":"2a49444e3f20350d","call":"WriteFile","n":8}
+{"t":1795730204.068292,"kind":"data","src":"com1","dir":"in","hex":"5449434b544553542c2a49444e3f20350d0a","call":"ReadFile","n":18,"req":127}
+{"t":1795730204.374201,"kind":"frame","src":"screen","file":"frames/000007.png","full":false,"x":0,"y":96,"w":192,"h":32}
+{"t":1795730204.374201,"kind":"frame","src":"screen","file":"frames/000008.png","full":false,"x":352,"y":320,"w":320,"h":128}
+{"t":1795730204.374201,"kind":"frame","src":"screen","file":"frames/000009.png","full":false,"x":352,"y":448,"w":288,"h":32}
+{"t":1795730204.379461,"kind":"input","src":"input","what":"window","title":"Tick"}
+{"t":1795730204.377063,"kind":"data","src":"com1","dir":"out","hex":"2a49444e3f20360d","call":"WriteFile","n":8}
+{"t":1795730204.427200,"kind":"data","src":"com1","dir":"in","hex":"5449434b544553542c2a49444e3f20360d0a","call":"ReadFile","n":18,"req":127}
+{"t":1795730204.450231,"kind":"status","text":"Tick stopped listening to fakevendor.exe (the program keeps running)"}
+{"t":1795730204.451981,"kind":"status","text":"Tick stopped recording"}

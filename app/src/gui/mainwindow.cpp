@@ -25,6 +25,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QShortcut>
+#include <QScrollArea>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -52,6 +53,12 @@ QLabel* dot() {
     l->setFixedSize(12, 16);
     l->setObjectName(QStringLiteral("dot"));
     return l;
+}
+
+// Wrapped labels in a grid do not claim their height by themselves.
+void fitHeight(QLabel* l) {
+    const int w = l->width() > 80 ? l->width() : 440;
+    l->setMinimumHeight(l->heightForWidth(w));
 }
 
 void setDot(QLabel* l, const char* state) {
@@ -266,6 +273,12 @@ QWidget* MainWindow::buildRecordPage() {
     preview_->setPlaceholder(QStringLiteral("No camera.\nThe traffic is recorded all the same."));
     top->addWidget(preview_, 3);
 
+    // the side column scrolls when everything is plugged in and the window is small
+    auto* sideScroll = new QScrollArea;
+    sideScroll->setFrameShape(QFrame::NoFrame);
+    sideScroll->setWidgetResizable(true);
+    sideScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    sideScroll->setStyleSheet(QStringLiteral("QScrollArea { background: transparent; } QWidget#qt_scrollarea_viewport { background: transparent; }"));
     auto* side = new QVBoxLayout;
     side->setSpacing(12);
     top->addLayout(side, 2);
@@ -333,8 +346,50 @@ QWidget* MainWindow::buildRecordPage() {
     demoButton_->setFlat(true);
     demoButton_->setObjectName(QStringLiteral("link"));
     connect(demoButton_, &QPushButton::clicked, this, [this] { setDemo(!demo_); });
-    cl->addWidget(demoButton_, 5, 1, Qt::AlignLeft);
-    side->addWidget(conn);
+    // the USB sniffer (shown when a Pico is plugged in)
+    usbDot_ = dot();
+    usbText_ = new QLabel;
+    usbText_->setWordWrap(true);
+    usbText_->setMinimumHeight(usbText_->fontMetrics().lineSpacing() * 2 + 6);
+    useUsb_ = new QCheckBox(QStringLiteral("Use the USB sniffer"));
+    useUsb_->setChecked(settings().value(QStringLiteral("useUsb"), true).toBool());
+    connect(useUsb_, &QCheckBox::toggled, this, [this](bool on) {
+        settings().setValue(QStringLiteral("useUsb"), on);
+        updateRecordUi();
+    });
+    cl->addWidget(usbDot_, 5, 0, Qt::AlignTop);
+    cl->addWidget(usbText_, 5, 1);
+    cl->addWidget(useUsb_, 6, 1);
+    // the network: off unless asked for
+    ethDot_ = dot();
+    ethText_ = new QLabel;
+    ethText_->setWordWrap(true);
+    auto* ethRow = new QHBoxLayout;
+    ethRow->setSpacing(8);
+    useEth_ = new QCheckBox(QStringLiteral("Record the network on"));
+    useEth_->setChecked(settings().value(QStringLiteral("useEthernet"), false).toBool());
+    ifaceBox_ = new QComboBox;
+    ifaceBox_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    ifaceBox_->setMinimumContentsLength(14);
+    switchHelp_ = new QPushButton(QStringLiteral("Switch setup?"));
+    switchHelp_->setObjectName(QStringLiteral("link"));
+    switchHelp_->setToolTip(QStringLiteral("How to make the switch copy the instrument's traffic to this computer"));
+    connect(switchHelp_, &QPushButton::clicked, this, &MainWindow::switchHelp);
+    connect(useEth_, &QCheckBox::toggled, this, [this](bool on) {
+        settings().setValue(QStringLiteral("useEthernet"), on);
+        refreshConnections();
+    });
+    connect(ifaceBox_, &QComboBox::activated, this, [this] { settings().setValue(QStringLiteral("ethIface"), ifaceBox_->currentData().toString()); });
+    ethRow->addWidget(useEth_);
+    ethRow->addWidget(ifaceBox_, 1);
+    ethRow->addWidget(switchHelp_);
+    cl->addWidget(ethDot_, 7, 0, Qt::AlignTop);
+    cl->addLayout(ethRow, 7, 1);
+    cl->addWidget(ethText_, 8, 1);
+    cl->addWidget(demoButton_, 9, 1, Qt::AlignLeft);
+    sideScroll->setWidget(conn);
+    sideScroll->setMinimumWidth(520);
+    side->addWidget(sideScroll, 1);   // only the connections scroll; Record and Mark stay in view
 
     record_ = new QPushButton(QStringLiteral("●  Record"));
     record_->setObjectName(QStringLiteral("record"));
@@ -379,7 +434,6 @@ QWidget* MainWindow::buildRecordPage() {
     mb->addWidget(sync_, 1);
     ml->addLayout(mb);
     side->addWidget(markBox);
-    side->addStretch();
     auto* sc = new QShortcut(QKeySequence(Qt::Key_Space), page);
     connect(sc, &QShortcut::activated, this, &MainWindow::doMark);
 
@@ -527,6 +581,50 @@ void MainWindow::refreshConnections() {
         speedText_->setText(g.ready ? QStringLiteral("%1 baud, %2").arg(c.line.baud).arg(c.line.text()) : QString());
         speedText_->setToolTip(QStringLiteral("Not sure of the speed? Press Find speed while the vendor software talks to the instrument."));
     }
+    // USB sniffer
+    const auto picos = listPicos();
+    picoPort_ = picos.empty() ? QString() : picos.front().path;
+    const bool usbShown = !picos.empty() && !demo_;
+    usbDot_->setVisible(usbShown);
+    usbText_->setVisible(usbShown);
+    useUsb_->setVisible(usbShown);
+    if (usbShown) {
+        usbText_->setText(QStringLiteral("<b>USB sniffer ready</b> (Pico on %1). It captures in short pieces: press Record, do one action, press Stop.")
+                              .arg(picos.front().port));
+        setDot(usbDot_, "ok");
+    }
+    // network
+    {
+        const auto ifs = listInterfaces();
+        QStringList ids{QString()};
+        for (const NetInterface& n : ifs) ids << n.name;
+        QStringList have;
+        for (int i = 0; i < ifaceBox_->count(); ++i) have << ifaceBox_->itemData(i).toString();
+        if (ids != have) {
+            const QString cur = ifaceBox_->count() ? ifaceBox_->currentData().toString() : settings().value(QStringLiteral("ethIface")).toString();
+            ifaceBox_->clear();
+            ifaceBox_->addItem(QStringLiteral("automatic"), QString());
+            ifaceBox_->setItemData(0, QStringLiteral("The wired port that sees the most traffic when recording starts"), Qt::ToolTipRole);
+            for (const NetInterface& n : ifs) ifaceBox_->addItem(n.label, n.name);
+            const int k = ifaceBox_->findData(cur);
+            ifaceBox_->setCurrentIndex(k >= 0 ? k : 0);
+        }
+        const bool on = useEth_->isChecked() && !demo_;
+        ifaceBox_->setEnabled(on);
+        ethText_->setVisible(on);
+        useEth_->setVisible(!demo_);
+        ifaceBox_->setVisible(!demo_);
+        switchHelp_->setVisible(!demo_);
+        ethDot_->setVisible(!demo_);
+        if (on) {
+            const CaptureAccess acc = captureAccess();
+            ethText_->setText(acc.ok ? QStringLiteral("The switch must copy (mirror) the instrument's and the PC's ports to this computer's port.")
+                                     : acc.sentence);
+            setDot(ethDot_, acc.ok ? "ok" : "warn");
+        } else {
+            setDot(ethDot_, "off");
+        }
+    }
     swap_->setVisible(!demo_);
     speed_->setVisible(!demo_);
     swap_->setEnabled(!portA_.isEmpty());
@@ -548,14 +646,14 @@ void MainWindow::refreshConnections() {
     cameraBox_->setVisible(!cams.empty());
     useCamera_->setVisible(!cams.empty());
     if (cams.empty()) {
-        camText_->setText(QStringLiteral("No camera found. That is fine when Tick records the screen on the instrument PC; "
-                                         "otherwise plug in a webcam and point it at the PC's screen."));
+        camText_->setText(QStringLiteral("No camera found. Fine when Tick records the PC's screen; otherwise plug in a webcam aimed at it."));
         setDot(camDot_, "off");
         preview_->setPlaceholder(QStringLiteral("No camera.\nThe traffic is recorded all the same."));
     } else if (!useCamera_->isChecked()) {
         camText_->setText(QStringLiteral("Camera off: no pictures of the screen will be kept."));
         setDot(camDot_, "off");
     }
+    for (QLabel* l : {tapText_, camText_, usbText_, ethText_}) fitHeight(l);
     updateRecordUi();
 }
 
@@ -579,7 +677,8 @@ void MainWindow::updateRecordUi() {
     record_->setProperty("recording", on);
     record_->style()->unpolish(record_);
     record_->style()->polish(record_);
-    const bool ready = demo_ || !guessTap(adapters_, portA_, portB_).a.isEmpty() || (feed_.isOpen() && useCamera_->isChecked());
+    const bool ready = demo_ || !guessTap(adapters_, portA_, portB_).a.isEmpty() || (feed_.isOpen() && useCamera_->isChecked()) ||
+                       (!picoPort_.isEmpty() && useUsb_->isChecked()) || useEth_->isChecked();
     record_->setEnabled(on || ready);
     mark_->setEnabled(on);
     sync_->setEnabled(on);
@@ -589,11 +688,18 @@ void MainWindow::updateRecordUi() {
     advanced_->setEnabled(!on);
     demoButton_->setEnabled(!on);
     useCamera_->setEnabled(!on);
+    useUsb_->setEnabled(!on);
+    useEth_->setEnabled(!on);
+    ifaceBox_->setEnabled(!on && useEth_->isChecked());
     cameraBox_->setEnabled(!on);
     attention_->setVisible(false);
     if (on) {
         const QJsonObject st = rec_.status();
         const QJsonObject s0 = st.value(QStringLiteral("stats")).toObject();
+        if (s0.contains(QStringLiteral("usb_events"))) {
+            attention_->setText(QStringLiteral("USB: do one action, then press Stop. The sniffer's memory holds well under a minute."));
+            attention_->setVisible(true);
+        }
         if (!demo_ && rec_.elapsed() > 8 && s0.contains(QStringLiteral("bytes_a"))) {
             const bool noA = s0.value(QStringLiteral("bytes_a")).toInt() == 0, noB = s0.value(QStringLiteral("bytes_b")).toInt() == 0;
             if (noA || noB) {
@@ -606,8 +712,8 @@ void MainWindow::updateRecordUi() {
         const QJsonObject s = st.value(QStringLiteral("stats")).toObject();
         recStatus_->setText(QStringLiteral("<b>Recording %1</b><br>%2 bytes from the PC, %3 from the instrument · %4 marks · %5 pictures")
                                 .arg(clockText(rec_.elapsed(), false))
-                                .arg(s.value(QStringLiteral("bytes_a")).toInt())
-                                .arg(s.value(QStringLiteral("bytes_b")).toInt())
+                                .arg(s.value(QStringLiteral("bytes_a")).toInt() + s.value(QStringLiteral("eth_bytes_a")).toInt())
+                                .arg(s.value(QStringLiteral("bytes_b")).toInt() + s.value(QStringLiteral("eth_bytes_b")).toInt())
                                 .arg(st.value(QStringLiteral("marks")).toInt())
                                 .arg(s.value(QStringLiteral("stills")).toInt()));
     } else if (!ready) {
@@ -625,7 +731,13 @@ bool MainWindow::startRecording() {
     RecordOptions o;
     o.demo = demo_;
     o.tapConfig = tapConfig();
-    o.tap = !o.tapConfig.portA.isEmpty() && !o.tapConfig.portB.isEmpty();
+    o.tap = !demo_ && !o.tapConfig.portA.isEmpty() && !o.tapConfig.portB.isEmpty() && !guessTap(adapters_, portA_, portB_).a.isEmpty();
+    o.usb = !demo_ && !picoPort_.isEmpty() && useUsb_->isChecked();
+    o.pico.port = picoPort_;
+    o.pico.lowSpeed = settings().value(QStringLiteral("usbLowSpeed"), false).toBool();
+    o.ethernet = !demo_ && useEth_->isChecked();
+    o.eth.iface = ifaceBox_->currentData().toString();
+    o.eth.instrumentIp = settings().value(QStringLiteral("instrumentIp")).toString();
     o.stillEvery = settings().value(QStringLiteral("stillEvery"), 0.5).toDouble();
     rec_.setCamera(useCamera_->isChecked() && feed_.isOpen() ? &feed_ : nullptr);
     liveNames_ = QJsonObject{{QStringLiteral("a"), o.tapConfig.nameA}, {QStringLiteral("b"), o.tapConfig.nameB}};
@@ -666,6 +778,21 @@ void MainWindow::findSpeed() {
     if (g.baud) settings().setValue(QStringLiteral("baud"), g.baud);
     refreshConnections();
     QMessageBox::information(this, QStringLiteral("Find speed"), g.sentence);
+}
+
+void MainWindow::switchHelp() {
+    QMessageBox::information(this, QStringLiteral("Setting up the switch"),
+        QStringLiteral("<p>A normal switch only sends this computer its own traffic. A switch with <b>port mirroring</b> "
+                       "(e.g. TP-Link TL-SG105E) can copy the instrument's and the PC's traffic to it.</p>"
+                       "<ol><li>Connect this computer alone to the switch. Its address is 192.168.0.1: give this computer "
+                       "192.168.0.10 / 255.255.255.0 on that port and open <tt>http://192.168.0.1</tt> (user admin, password admin; "
+                       "set a new one).</li>"
+                       "<li>Monitoring ▸ Port Mirror: enable; <b>mirroring port</b> = this computer's port (say 5); "
+                       "<b>mirrored ports</b> = the instrument's and the PC's ports (say 1 and 2), each with Ingress and Egress. "
+                       "Apply, then System ▸ Save Config.</li>"
+                       "<li>Plug the instrument into port 1 and its PC into port 2. They keep their own addresses; the switch is "
+                       "invisible to them. This computer only listens.</li></ol>"
+                       "<p>Menu names are from TP-Link's documentation; check them on your switch.</p>"));
 }
 
 void MainWindow::advancedDialog() {
@@ -712,6 +839,13 @@ void MainWindow::advancedDialog() {
     every->setSuffix(QStringLiteral(" s"));
     every->setValue(s.value(QStringLiteral("stillEvery"), 0.5).toDouble());
     f->addRow(QStringLiteral("Camera picture every:"), every);
+    auto* ip = new QLineEdit(s.value(QStringLiteral("instrumentIp")).toString());
+    ip->setPlaceholderText(QStringLiteral("all traffic"));
+    ip->setToolTip(QStringLiteral("Only record network traffic to and from this address"));
+    f->addRow(QStringLiteral("Network: instrument's address:"), ip);
+    auto* usbLow = new QCheckBox(QStringLiteral("Low-speed USB device (1.5 Mbit/s: keyboards, some old devices)"));
+    usbLow->setChecked(s.value(QStringLiteral("usbLowSpeed"), false).toBool());
+    f->addRow(QStringLiteral("USB sniffer:"), usbLow);
     auto* ws = new QLineEdit(workspaceDir());
     auto* wsRow = new QHBoxLayout;
     auto* browse = new QPushButton(QStringLiteral("…"));
@@ -751,6 +885,8 @@ void MainWindow::advancedDialog() {
     s.setValue(QStringLiteral("nameA"), na->text().trimmed().isEmpty() ? QStringLiteral("PC") : na->text().trimmed());
     s.setValue(QStringLiteral("nameB"), nb->text().trimmed().isEmpty() ? QStringLiteral("Instrument") : nb->text().trimmed());
     s.setValue(QStringLiteral("stillEvery"), every->value());
+    s.setValue(QStringLiteral("instrumentIp"), ip->text().trimmed());
+    s.setValue(QStringLiteral("usbLowSpeed"), usbLow->isChecked());
     if (ws->text() != workspaceDir()) s.setValue(QStringLiteral("workspace"), ws->text());
     refreshConnections();
 }

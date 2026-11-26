@@ -29,9 +29,11 @@ bool Recorder::start(const RecordOptions& o, QString* error) {
     std::vector<std::unique_ptr<Source>> sources;
     if (o.demo) sources.push_back(std::make_unique<DemoTapSource>());
     else if (o.tap) sources.push_back(std::make_unique<SerialTapSource>(o.tapConfig));
+    if (o.usb) sources.push_back(std::make_unique<PicoSource>(o.pico));
+    if (o.ethernet) sources.push_back(std::make_unique<EthernetSource>(o.eth));
     if (camera_ && camera_->isOpen()) sources.push_back(std::make_unique<CameraSource>(camera_, o.stillEvery));
     if (sources.empty()) {
-        if (error) *error = QStringLiteral("nothing to record: no serial tap and no camera");
+        if (error) *error = QStringLiteral("nothing to record: no serial tap, USB sniffer, network or camera");
         return false;
     }
 

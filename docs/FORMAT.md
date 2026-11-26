@@ -64,8 +64,8 @@ Source kinds:
 | kind | recorder | data |
 |---|---|---|
 | `serial-tap` | LibreTap | two listen-only lines; `dir` is `a` (PC's TX) or `b` (instrument's TX); `names` gives labels |
-| `usb-pico` | LibreTap | Pico usb-sniffer-lite; events carry decoded packets/transfers |
-| `ethernet` | LibreTap | pcap in `raw/`, events carry per-packet summaries |
+| `usb-pico` | LibreTap | Pico usb-sniffer-lite: `usb` events (control transfers, resets) and `data` per endpoint (below) |
+| `ethernet` | LibreTap | pcapng in `raw/`; `data` per TCP chunk / UDP datagram, `packet` summaries (below) |
 | `camera` | LibreTap | stills of the instrument PC's screen |
 | `screen` | Tick | screenshots (full frames and changed regions) |
 | `api-serial` | Tick | calls the vendor program makes on a COM port |
@@ -105,6 +105,42 @@ line settings the tap listened with.
 
 Camera stills (LibreTap): a full-resolution JPEG every `every_s` seconds while the picture changes, and at least one
 every 5 s when it does not; always `full: true`. `t` is when the frame reached the laptop (a frame or two late).
+
+USB through the Pico sniffer (`usb-pico`, LibreTap): one capture per recording (the sniffer holds 232 kB). The
+sniffer's text dump is kept in `raw/usb_cap.txt`; its decoded transfers are events. `dir` is `out` (host → device,
+i.e. the PC's side) or `in`; `addr` is the device address, `ep` the endpoint number; `what` says it in words;
+`t_ms` is the time in the dump (ms since the capture's first frame), and `t` = when Record started the capture +
+`t_ms` (about ±50 ms).
+
+```jsonc
+{"t":…,"kind":"usb","src":"usb","addr":5,"ep":0,"dir":"out","what":"FTDI SET_BAUD_RATE wValue=0x4138 … (about 9600 baud)","t_ms":12.3}
+{"t":…,"kind":"usb","src":"usb","addr":0,"ep":0,"dir":"in","what":"GET_DESCRIPTOR device #0: USB 2.00, VID 0403 PID 6001, …"}
+{"t":…,"kind":"usb","src":"usb","what":"bus reset"}
+{"t":…,"kind":"data","src":"usb","addr":5,"ep":2,"dir":"out","what":"bulk 6 bytes","hex":"4d4541533f0d","t_ms":14.0}
+{"t":…,"kind":"data","src":"usb","addr":5,"ep":1,"dir":"in","what":"bulk 12 bytes","hex":"…"}   // FTDI status bytes removed
+```
+
+Control transfers (endpoint 0) are `usb` events, with the data stage in `hex` except for descriptors (decoded in
+`what`). Bulk and interrupt payload is `data`, merged per endpoint until a short packet or a 10 ms pause (interrupt:
+one report each). `truncated: true` marks data the sniffer cut short (its "limit to 16 bytes" display setting).
+Source entry: `{"id":"usb","kind":"usb-pico","port":"/dev/ttyACM0","speed":"full","raw":"raw/usb_cap.txt","settings":{…}}`.
+
+Ethernet (`ethernet`, LibreTap): dumpcap writes `raw/eth_NNNNN_<date>.pcapng` (a ring of files, 50 MB each, 20 at
+most). TCP is reassembled per connection and direction (out-of-order segments held back, retransmitted bytes dropped)
+and cut into chunks like the serial tap; UDP is one `data` event per datagram. `dir` `a` = towards the instrument
+(to `instrument_ip` when one is set; else from the side that opened the connection, or from the higher port),
+`b` = from it. Everything else worth a line is a `packet` event; pure TCP acknowledgements are only counted.
+
+```jsonc
+{"t":…,"kind":"data","src":"eth","dir":"a","proto":"tcp","conn":"192.168.0.10:50000 → 192.168.0.20:5025","hex":"2a49444e3f0a","end":…}
+{"t":…,"kind":"data","src":"eth","dir":"b","proto":"udp","conn":"192.168.0.10:40000 → 192.168.0.20:5000","hex":"504f4e47"}
+{"t":…,"kind":"packet","src":"eth","proto":"arp","text":"ARP: who has 192.168.0.20? tell 192.168.0.10"}
+{"t":…,"kind":"packet","src":"eth","proto":"tcp","text":"TCP connection opened: 192.168.0.10:50000 → 192.168.0.20:5025"}
+```
+
+`conn` is always written PC side first. Source entry: `{"id":"eth","kind":"ethernet","interface":"eno1",
+"instrument_ip":"192.168.0.20","names":{"a":"PC","b":"Instrument"},"raw":"raw/eth_*.pcapng","gap_ms":20}`. Packet
+times are the capturing computer's clock, the same clock as the other LibreTap events.
 
 Screen frames: the first frame and every Nth (default every 60th stored frame) are `full: true`; the others are
 changed regions to be painted over the previous picture. A reader rebuilds the screen at time T by taking the

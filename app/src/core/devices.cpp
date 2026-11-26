@@ -3,6 +3,8 @@
 #include <QJsonArray>
 #include <QSerialPortInfo>
 
+#include "ethernet.h"
+
 #include <algorithm>
 
 namespace lt {
@@ -48,7 +50,7 @@ std::vector<Adapter> listAdapters(bool all) {
         a.description = i.description();
         a.manufacturer = i.manufacturer();
         a.serial = i.serialNumber();
-        if (a.vid == 0x2e8a) continue;   // a Pico is the USB sniffer (phase 2), not a tap line
+        if (a.vid == 0x2e8a || a.description.contains(QLatin1String("niffer"))) continue;   // a Pico is the USB sniffer, not a tap line
         if (a.usb || all) out.push_back(a);
     }
     for (const QString& f : qEnvironmentVariable("LIBRETAP_FAKE_ADAPTERS").split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
@@ -63,6 +65,34 @@ std::vector<Adapter> listAdapters(bool all) {
         if (x.usb != y.usb) return x.usb;
         return x.port.size() != y.port.size() ? x.port.size() < y.port.size() : x.port < y.port;
     });
+    return out;
+}
+
+std::vector<Adapter> listPicos() {
+    std::vector<Adapter> out;
+    for (const QSerialPortInfo& i : QSerialPortInfo::availablePorts()) {
+        const bool pico = (i.hasVendorIdentifier() && i.vendorIdentifier() == 0x2e8a) || i.description().contains(QLatin1String("niffer"));
+        if (!pico) continue;
+        Adapter a;
+        a.path = i.systemLocation();
+        a.port = i.portName();
+        a.usb = true;
+        a.vid = i.vendorIdentifier();
+        a.pid = i.productIdentifier();
+        a.chip = QStringLiteral("Raspberry Pi Pico");
+        a.description = i.description();
+        out.push_back(a);
+    }
+    const QString fake = qEnvironmentVariable("LIBRETAP_FAKE_PICO");
+    if (!fake.isEmpty()) {
+        Adapter a;
+        a.path = fake;
+        a.port = fake.section(QLatin1Char('/'), -2).remove(QStringLiteral("dev/"));
+        a.chip = QStringLiteral("Raspberry Pi Pico");
+        a.description = QStringLiteral("usb-sniffer-lite");
+        a.usb = true;
+        out.push_back(a);
+    }
     return out;
 }
 
@@ -103,10 +133,22 @@ QJsonObject connectionsJson() {
     const TapGuess g = guessTap(ad);
     const QString camSentence = cams.empty() ? QStringLiteral("No camera found (fine when Tick records the screen on the instrument PC).")
                                              : QStringLiteral("Camera: %1.").arg(cams.front().name);
+    QJsonArray picos, ifaces;
+    for (const Adapter& a : listPicos()) picos.append(a.toJson());
+    for (const NetInterface& n : listInterfaces()) ifaces.append(QJsonObject{{QStringLiteral("name"), n.name}, {QStringLiteral("label"), n.label}, {QStringLiteral("wired"), n.wired}, {QStringLiteral("up"), n.up}});
+    const CaptureAccess acc = captureAccess();
+    QJsonArray sentences{g.sentence, camSentence};
+    if (!picos.isEmpty())
+        sentences.append(QStringLiteral("USB sniffer ready (Pico on %1). It captures in short pieces: press Record, do one action, press Stop.")
+                             .arg(picos.first().toObject().value(QStringLiteral("port")).toString()));
+    sentences.append(acc.sentence);
     return {{QStringLiteral("adapters"), adapters},
             {QStringLiteral("cameras"), cameras},
+            {QStringLiteral("usb_sniffers"), picos},
+            {QStringLiteral("interfaces"), ifaces},
+            {QStringLiteral("ethernet"), QJsonObject{{QStringLiteral("ok"), acc.ok}, {QStringLiteral("dumpcap"), acc.program}, {QStringLiteral("via_sg"), acc.viaSg}}},
             {QStringLiteral("tap"), QJsonObject{{QStringLiteral("ready"), g.ready}, {QStringLiteral("a"), g.a}, {QStringLiteral("b"), g.b}}},
-            {QStringLiteral("sentences"), QJsonArray{g.sentence, camSentence}}};
+            {QStringLiteral("sentences"), sentences}};
 }
 
 }  // namespace lt
