@@ -109,6 +109,35 @@ every 5 s when it does not; always `full: true`. `t` is when the frame reached t
 Screen frames: the first frame and every Nth (default every 60th stored frame) are `full: true`; the others are
 changed regions to be painted over the previous picture. A reader rebuilds the screen at time T by taking the
 last full frame before T and painting the later regions up to T. Unchanged screenshots are not stored at all.
+Tick details: one screenshot can give several region frames; they have the same `t` and follow each other in the
+file. Full frames also carry `x`, `y` (0) and `w`, `h`. Tick also stores a full frame when more than half the screen
+changed, and its own window is painted flat grey in the pictures (`"tick": {"tick_window_masked": true}` in
+session.json) because its clock changes ten times a second. PNG files are 8-bit RGB.
+
+Tick session details (Tick 0.1):
+- session.json is rewritten when a source appears during recording (an `api-serial` source when the program first
+  opens a COM port) and at the end (`ended`). It also has `utc_offset_min` (the PC's offset from UTC at the start)
+  and `tick` (its screenshot options). Folder name: `YYYYMMDD-HHMMSS-<computer name in lowercase>`.
+- `api-serial` source ids are the port in lowercase (`com1`); `com-attached` for a port that was already open when
+  Tick attached to a running program (its name is then unknown).
+- `data`: `call` is `ReadFile`, `WriteFile`, `GetOverlappedResult` (an overlapped read completed),
+  `ReadFile (overlapped, seen late)` (completion noticed only when the program reused its OVERLAPPED; `t` is late)
+  or `TransmitCommChar`. Reads add `req` (bytes asked for); reads that return 0 bytes are not recorded. Writes are
+  recorded when the call is made with all bytes passed; `written` is added if fewer were written, `pending: true`
+  for overlapped writes still in progress.
+- `config` from Tick names the `call`: `SetCommState` (baud, bits, parity `N/O/E/M/S`, stop `1`/`1.5`/`2`, rts
+  `off/on/handshake/toggle`, dtr `off/on/handshake`, optional `cts_flow`, `dsr_flow`, `xonxoff` `in/out/both` with
+  `xon`/`xoff` byte values), `SetCommTimeouts` (`timeouts` with `read_interval`, `read_total_multiplier`,
+  `read_total_constant`, `write_total_multiplier`, `write_total_constant`, in ms), `EscapeCommFunction` (`dtr` or
+  `rts` `on`/`off`, `xoff_sent`/`xon_sent`) or `SetCommBreak` (`break` `on`/`off`). `ok: false` when the call failed;
+  `current: true` for the settings read from a port when attaching.
+- `open` adds `error` (Windows error code) when `ok` is false and `overlapped: true` for overlapped handles.
+- `call` events: `PurgeComm` (`flags`, hex), `SetupComm` (`in_queue`, `out_queue`), `DeviceIoControl` on a COM handle.
+- `status`/`error` texts tell when Tick started the program, when its listener became active, when the program
+  ended (with exit code), and when listener records were lost because Tick could not keep up.
+- `files/` holds the program's small settings files (`*.ini`, `*.cfg`, `*.cnf`, `*.conf`, `*.set`, `*.par`, `*.prm`
+  from its folder, up to 1 MB each) copied before it started; `tick/TickHook.dll` is the listener Tick loaded into
+  the program (readers ignore it).
 
 ## Projects (recordings)
 

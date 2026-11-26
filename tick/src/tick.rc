@@ -1,0 +1,70 @@
+#include <windows.h>
+#include "resource.h"
+
+IDI_TICK ICON "tick.ico"
+
+/* TickHook.dll is carried inside Tick.exe so Tick stays one file. */
+IDR_HOOKDLL RCDATA "../build/TickHook.dll"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS 0x4
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "LibreTap"
+      VALUE "FileDescription", "Tick - screen and serial recorder for LibreTap"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "InternalName", "Tick"
+      VALUE "LegalCopyright", "Part of LibreTap"
+      VALUE "OriginalFilename", "Tick.exe"
+      VALUE "ProductName", "LibreTap"
+      VALUE "ProductVersion", "0.1.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
+
+IDD_ADV DIALOG 0, 0, 260, 228
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Tick - Advanced"
+FONT 8, "MS Sans Serif"
+BEGIN
+  LTEXT "Take a screenshot every", -1, 8, 10, 90, 8
+  EDITTEXT IDC_INTERVAL, 100, 8, 36, 12, ES_NUMBER
+  LTEXT "milliseconds", -1, 140, 10, 60, 8
+  LTEXT "Store a full picture every", -1, 8, 26, 90, 8
+  EDITTEXT IDC_FULLEVERY, 100, 24, 36, 12, ES_NUMBER
+  LTEXT "stored screenshots", -1, 140, 26, 80, 8
+  AUTOCHECKBOX "Show the mouse pointer in screenshots", IDC_CURSOR, 8, 42, 240, 10
+  AUTOCHECKBOX "Record the title of the active window", IDC_TITLES, 8, 54, 240, 10
+  AUTOCHECKBOX "Leave Tick's own window out of screenshots", IDC_MASK, 8, 66, 240, 10
+  AUTOCHECKBOX "Keep Tick on top of other windows", IDC_TOPMOST, 8, 78, 240, 10
+  AUTOCHECKBOX "Copy the started program's settings files (*.ini, *.cfg...)", IDC_COPYSET, 8, 90, 240, 10
+  LTEXT "Sessions folder (empty: TickSessions next to Tick.exe):", -1, 8, 106, 240, 8
+  EDITTEXT IDC_DIR, 8, 116, 244, 12, ES_AUTOHSCROLL
+  PUSHBUTTON "Open sessions folder", IDC_OPENDIR, 8, 134, 100, 14
+  PUSHBUTTON "Listen to a running program...", IDC_ATTACH, 120, 134, 132, 14
+  LTEXT "", IDC_INFO, 8, 156, 244, 40
+  DEFPUSHBUTTON "OK", IDOK, 146, 206, 50, 14
+  PUSHBUTTON "Cancel", IDCANCEL, 202, 206, 50, 14
+END
+
+
+IDD_ATTACH DIALOG 0, 0, 220, 200
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Listen to a running program"
+FONT 8, "MS Sans Serif"
+BEGIN
+  LTEXT "If the program opened its COM port before Tick listens, Tick sees the data but not the port settings. Starting the program from Tick is better.", -1, 8, 6, 204, 26
+  LISTBOX IDC_PROCLIST, 8, 34, 204, 140, LBS_NOTIFY | WS_VSCROLL | WS_BORDER | WS_TABSTOP
+  DEFPUSHBUTTON "Listen", IDOK, 106, 180, 50, 14
+  PUSHBUTTON "Cancel", IDCANCEL, 162, 180, 50, 14
+END
