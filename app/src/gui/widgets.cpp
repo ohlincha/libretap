@@ -10,12 +10,20 @@
 #include <algorithm>
 
 #include "core/util.h"
+#include "theme.h"
 
 namespace lt::gui {
 
 namespace {
-const QColor kPc("#2f7fd0"), kInstr("#2bb0a6"), kMark("#e8890c"), kSync("#8e5bd0");
+QColor kPcC() { return theme::pcColor(); }
+QColor kInstrC() { return theme::instrumentColor(); }
+QColor kMarkC() { return theme::markColor(); }
+QColor kSyncC() { return theme::syncColor(); }
 }
+#define kPc kPcC()
+#define kInstr kInstrC()
+#define kMark kMarkC()
+#define kSync kSyncC()
 
 void RowModel::setRows(std::vector<Row> rows, double t0) {
     beginResetModel();
@@ -55,10 +63,11 @@ QVariant RowModel::data(const QModelIndex& i, int role) const {
         f.setBold(true);
         return f;
     }
-    if (role == Qt::ForegroundRole && i.column() == 1 && r.dir >= 0) return r.dir == 0 ? kPc : kInstr.darker(115);
+    if (role == Qt::ForegroundRole && i.column() == 1 && r.dir >= 0) return r.dir == 0 ? kPc : kInstr;
+    if (role == Qt::ForegroundRole && i.column() == 0) return theme::dim();
     if (role == Qt::BackgroundRole && flag) {
         QColor c = r.kind == QLatin1String("mark") ? kMark : kSync;
-        c.setAlpha(45);
+        c.setAlpha(theme::isDark() ? 50 : 40);
         return c;
     }
     if (role == Qt::BackgroundRole && r.kind == QLatin1String("error")) return QColor(220, 60, 60, 40);
@@ -107,10 +116,10 @@ void PictureView::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
     p.setRenderHint(QPainter::Antialiasing);
-    const QRectF r = QRectF(rect()).adjusted(1, 1, -1, -1);
-    p.setPen(QPen(palette().color(QPalette::Mid), 1));
-    p.setBrush(palette().color(QPalette::Window).darker(108));
-    p.drawRoundedRect(r, 8, 8);
+    const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+    p.setPen(QPen(theme::border(), 1));
+    p.setBrush(theme::pictureBackground());
+    p.drawRoundedRect(r, 12, 12);
     const int capH = caption_.isEmpty() ? 0 : fontMetrics().height() + 8;
     if (img_.isNull()) {
         p.setPen(palette().color(QPalette::PlaceholderText));
@@ -119,15 +128,15 @@ void PictureView::paintEvent(QPaintEvent*) {
         p.setFont(f);
         p.drawText(r.adjusted(24, 24, -24, -24), Qt::AlignCenter | Qt::TextWordWrap, placeholder_);
     } else {
-        const QRectF area = r.adjusted(6, 6, -6, -6 - capH);
+        const QRectF area = r.adjusted(10, 10, -10, -10 - capH);
         QSizeF s = img_.size();
         s.scale(area.size(), Qt::KeepAspectRatio);
         const QRectF target(area.center().x() - s.width() / 2, area.center().y() - s.height() / 2, s.width(), s.height());
         p.drawImage(target, img_);
     }
     if (capH) {
-        p.setPen(palette().color(QPalette::WindowText));
-        p.drawText(r.adjusted(10, 0, -10, -4), Qt::AlignBottom | Qt::AlignHCenter, caption_);
+        p.setPen(theme::dim());
+        p.drawText(r.adjusted(10, 0, -10, -6), Qt::AlignBottom | Qt::AlignHCenter, caption_);
     }
 }
 
@@ -157,8 +166,10 @@ void TimelineBar::paintEvent(QPaintEvent*) {
     p.setRenderHint(QPainter::Antialiasing);
     const double mid = 36;
     p.setPen(Qt::NoPen);
-    p.setBrush(palette().color(QPalette::Base));
-    p.drawRoundedRect(QRectF(4, 18, width() - 8, 36), 6, 6);
+    p.setBrush(theme::card());
+    p.setPen(QPen(theme::border(), 1));
+    p.drawRoundedRect(QRectF(4.5, 18.5, width() - 9, 35), 8, 8);
+    p.setPen(Qt::NoPen);
     // traffic: a tick per chunk, PC's up, instrument's down
     for (const auto& [t, d] : traffic_) {
         const double x = xOf(t);
@@ -166,7 +177,7 @@ void TimelineBar::paintEvent(QPaintEvent*) {
         if (d == 0) p.drawLine(QPointF(x, mid - 1), QPointF(x, mid - 12));
         else p.drawLine(QPointF(x, mid + 1), QPointF(x, mid + 12));
     }
-    p.setPen(QPen(palette().color(QPalette::Mid), 1));
+    p.setPen(QPen(theme::border(), 1));
     p.drawLine(QPointF(12, mid), QPointF(width() - 12, mid));
     // pictures
     p.setPen(Qt::NoPen);

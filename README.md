@@ -8,7 +8,7 @@ instrument, and a webcam keeps pictures of the PC's screen. Afterwards the timel
 by side, so anyone (or an AI assistant) can work out what each setting sends, and write new software for the
 instrument.
 
-![Timeline](app/docs/timeline-with-tick.png)
+![Timeline](app/docs/timeline-with-tick-light.png)
 
 - **Serial tap**: a passive two-lead DB-9 tap and two USB-serial adapters (one per direction). The adapters only
   listen; nothing is ever sent.

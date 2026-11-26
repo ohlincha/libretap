@@ -11,7 +11,10 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFormLayout>
-#include <QGroupBox>
+#include <QAction>
+#include <QFrame>
+#include <QMenu>
+#include <QToolButton>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -37,6 +40,7 @@
 #include "core/match.h"
 #include "core/util.h"
 #include "splash.h"
+#include "theme.h"
 
 namespace lt::gui {
 
@@ -45,7 +49,7 @@ QSettings settings() { return QSettings(QStringLiteral("LibreTap"), QStringLiter
 
 QLabel* dot() {
     auto* l = new QLabel;
-    l->setFixedSize(14, 14);
+    l->setFixedSize(12, 16);
     l->setObjectName(QStringLiteral("dot"));
     return l;
 }
@@ -56,6 +60,22 @@ void setDot(QLabel* l, const char* state) {
     l->style()->polish(l);
 }
 
+// A card: a rounded surface with a small accent title (instead of a sunken group box).
+QFrame* card(const QString& title, QBoxLayout** body) {
+    auto* f = new QFrame;
+    f->setObjectName(QStringLiteral("card"));
+    auto* v = new QVBoxLayout(f);
+    v->setContentsMargins(16, 12, 16, 14);
+    v->setSpacing(8);
+    if (!title.isEmpty()) {
+        auto* t = new QLabel(title);
+        t->setObjectName(QStringLiteral("cardTitle"));
+        v->addWidget(t);
+    }
+    *body = v;
+    return f;
+}
+
 QTableView* table(RowModel* m) {
     auto* v = new QTableView;
     v->setModel(m);
@@ -63,9 +83,13 @@ QTableView* table(RowModel* m) {
     v->setSelectionMode(QAbstractItemView::SingleSelection);
     v->setEditTriggers(QAbstractItemView::NoEditTriggers);
     v->verticalHeader()->hide();
-    v->verticalHeader()->setDefaultSectionSize(v->fontMetrics().height() + 6);
+    v->verticalHeader()->setDefaultSectionSize(v->fontMetrics().height() + 12);
+    v->setShowGrid(false);
+    v->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    v->horizontalHeader()->setHighlightSections(false);
+    v->setFrameShape(QFrame::NoFrame);
     v->setWordWrap(false);
-    v->setAlternatingRowColors(true);
+    v->setAlternatingRowColors(false);
     v->horizontalHeader()->setStretchLastSection(true);
     v->setColumnWidth(0, 96);
     v->setColumnWidth(1, 190);
@@ -85,18 +109,67 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     pages_ = new QStackedWidget;
     pages_->addWidget(buildRecordPage());
     pages_->addWidget(buildTimelinePage());
-    setCentralWidget(pages_);
-
-    auto* file = menuBar()->addMenu(QStringLiteral("&File"));
-    file->addAction(QStringLiteral("&New recording"), QKeySequence::New, this, &MainWindow::showRecordPage);
-    file->addAction(QStringLiteral("&Open recording…"), QKeySequence::Open, this, [this] {
+    auto* central = new QWidget;
+    auto* cv = new QVBoxLayout(central);
+    cv->setContentsMargins(0, 0, 0, 0);
+    cv->setSpacing(0);
+    // a header bar (GNOME style): the app's name and what is open, Open… and the main menu
+    auto* header = new QFrame;
+    header->setObjectName(QStringLiteral("header"));
+    auto* hl = new QHBoxLayout(header);
+    hl->setContentsMargins(14, 8, 10, 8);
+    hl->setSpacing(10);
+    auto* logo = new QLabel;
+    logo->setPixmap(appIcon().pixmap(28, 28));
+    auto* names = new QVBoxLayout;
+    names->setSpacing(0);
+    auto* appTitle = new QLabel(QStringLiteral("LibreTap"));
+    appTitle->setObjectName(QStringLiteral("appTitle"));
+    headerSub_ = new QLabel(QStringLiteral("New recording"));
+    headerSub_->setObjectName(QStringLiteral("subtitle"));
+    names->addWidget(appTitle);
+    names->addWidget(headerSub_);
+    auto* openBtn = new QPushButton(QStringLiteral("Open…"));
+    openBtn->setToolTip(QStringLiteral("Open a recording (Ctrl+O)"));
+    auto* newBtn = new QPushButton(QStringLiteral("New recording"));
+    newBtn->setObjectName(QStringLiteral("flat"));
+    auto* menuBtn = new QToolButton;
+    menuBtn->setText(QStringLiteral("☰"));
+    menuBtn->setObjectName(QStringLiteral("flat"));
+    menuBtn->setPopupMode(QToolButton::InstantPopup);
+    menuBtn->setToolTip(QStringLiteral("Main menu"));
+    hl->addWidget(logo);
+    hl->addLayout(names);
+    hl->addStretch(1);
+    hl->addWidget(newBtn);
+    hl->addWidget(openBtn);
+    hl->addWidget(menuBtn);
+    cv->addWidget(header);
+    cv->addWidget(pages_, 1);
+    setCentralWidget(central);
+    connect(newBtn, &QPushButton::clicked, this, &MainWindow::showRecordPage);
+    auto* openAct = new QAction(QStringLiteral("&Open recording…"), this);
+    openAct->setShortcut(QKeySequence::Open);
+    connect(openAct, &QAction::triggered, this, [this] {
         const QString d = QFileDialog::getExistingDirectory(this, QStringLiteral("Open a recording (or a session folder)"), workspaceDir());
         if (!d.isEmpty()) openRecording(d);
     });
+    connect(openBtn, &QPushButton::clicked, openAct, &QAction::trigger);
+    addAction(openAct);
+    auto* mainMenu = new QMenu(this);
+    menuBtn->setMenu(mainMenu);
+#ifdef Q_OS_MACOS
+    QMenu* file = menuBar()->addMenu(QStringLiteral("&File"));
+    QMenu* help = menuBar()->addMenu(QStringLiteral("&Help"));
+#else
+    menuBar()->hide();
+    QMenu* file = mainMenu;
+    QMenu* help = mainMenu;
+#endif
+    file->addAction(QStringLiteral("&New recording"), QKeySequence::New, this, &MainWindow::showRecordPage);
+    file->addAction(openAct);
     file->addAction(QStringLiteral("Add &Tick session…"), this, &MainWindow::addTickDialog);
     file->addSeparator();
-    file->addAction(QStringLiteral("&Quit"), QKeySequence::Quit, this, &QWidget::close);
-    auto* help = menuBar()->addMenu(QStringLiteral("&Help"));
     help->addAction(QStringLiteral("Try the &demo (no hardware)"), this, [this] {
         setDemo(true);
         showRecordPage();
@@ -112,6 +185,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                                           "<p>Agents and scripts: <tt>LibreTapCLI status | start | mark | sync | stop</tt> control this "
                                           "window.</p><p>MIT licence.</p>").arg(QStringLiteral(LIBRETAP_VERSION)));
     });
+    file->addSeparator();
+    auto* quit = file->addAction(QStringLiteral("&Quit"), QKeySequence::Quit, this, &QWidget::close);
+    addAction(quit);
 
     // the control socket: agents drive this window
     rec_.startHandler = [this](const QJsonObject&) {
@@ -145,7 +221,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     connect(&feed_, &CameraFeed::opened, this, [this](const QString& name) {
         const CameraMode m = feed_.mode();
-        camText_->setText(QStringLiteral("Camera: %1, %2 × %3. Point it at the instrument PC's screen.").arg(name).arg(m.w).arg(m.h));
+        camText_->setText(QStringLiteral("<b>Camera ready.</b> Pictures of %1 × %2 pixels.").arg(m.w).arg(m.h));
+        (void)name;
+        camText_->setToolTip(QStringLiteral("Point the camera at the instrument PC's screen."));
         setDot(camDot_, "ok");
     });
 
@@ -178,25 +256,36 @@ void MainWindow::closeEvent(QCloseEvent* e) {
 QWidget* MainWindow::buildRecordPage() {
     auto* page = new QWidget;
     auto* outer = new QVBoxLayout(page);
+    outer->setContentsMargins(16, 14, 16, 8);
+    outer->setSpacing(14);
     auto* top = new QHBoxLayout;
-    outer->addLayout(top, 3);
+    top->setSpacing(14);
+    outer->addLayout(top, 1);
 
     preview_ = new PictureView;
     preview_->setPlaceholder(QStringLiteral("No camera.\nThe traffic is recorded all the same."));
     top->addWidget(preview_, 3);
 
     auto* side = new QVBoxLayout;
+    side->setSpacing(12);
     top->addLayout(side, 2);
-    auto* conn = new QGroupBox(QStringLiteral("Connections"));
-    auto* cl = new QGridLayout(conn);
+    QBoxLayout* connBody = nullptr;
+    auto* conn = card(QStringLiteral("Connections"), &connBody);
+    conn->setMinimumWidth(500);   // the sentences fit in two lines
+    auto* cl = new QGridLayout;
+    cl->setHorizontalSpacing(10);
+    cl->setVerticalSpacing(8);
+    connBody->addLayout(cl);
     cl->setColumnStretch(1, 1);
     tapDot_ = dot();
     tapText_ = new QLabel;
     tapText_->setWordWrap(true);
     cl->addWidget(tapDot_, 0, 0, Qt::AlignTop);
     cl->addWidget(tapText_, 0, 1);
+    tapText_->setMinimumHeight(tapText_->fontMetrics().lineSpacing() * 2 + 6);   // wrapped labels in a grid lose height
     auto* tapButtons = new QHBoxLayout;
-    swap_ = new QPushButton(QStringLiteral("Swap PC / instrument"));
+    tapButtons->setSpacing(6);
+    swap_ = new QPushButton(QStringLiteral("Swap sides"));
     swap_->setToolTip(QStringLiteral("The PC side is the adapter on the tap lead that carries what the PC sends (DB-9 pin 3).\n"
                                      "Not sure? Record a few seconds: the PC usually speaks first."));
     connect(swap_, &QPushButton::clicked, this, [this] {
@@ -217,11 +306,12 @@ QWidget* MainWindow::buildRecordPage() {
     tapButtons->addStretch();
     cl->addLayout(tapButtons, 1, 1);
     speedText_ = new QLabel;
-    speedText_->setWordWrap(true);
-    cl->addWidget(speedText_, 2, 1);
+    speedText_->setObjectName(QStringLiteral("dimText"));
+    tapButtons->addWidget(speedText_);
     camDot_ = dot();
     camText_ = new QLabel;
     camText_->setWordWrap(true);
+    camText_->setMinimumHeight(camText_->fontMetrics().lineSpacing() + 2);
     cl->addWidget(camDot_, 3, 0, Qt::AlignTop);
     cl->addWidget(camText_, 3, 1);
     auto* camRow = new QHBoxLayout;
@@ -248,7 +338,7 @@ QWidget* MainWindow::buildRecordPage() {
 
     record_ = new QPushButton(QStringLiteral("●  Record"));
     record_->setObjectName(QStringLiteral("record"));
-    record_->setMinimumHeight(64);
+    record_->setMinimumHeight(58);
     connect(record_, &QPushButton::clicked, this, [this] {
         if (rec_.isRecording()) stopRecording();
         else startRecording();
@@ -256,17 +346,23 @@ QWidget* MainWindow::buildRecordPage() {
     side->addWidget(record_);
     recStatus_ = new QLabel;
     recStatus_->setWordWrap(true);
-    recStatus_->setObjectName(QStringLiteral("recStatus"));
+    recStatus_->setObjectName(QStringLiteral("dimText"));
     side->addWidget(recStatus_);
+    attention_ = new QLabel;
+    attention_->setObjectName(QStringLiteral("hint"));
+    attention_->setProperty("state", QStringLiteral("warn"));
+    attention_->setWordWrap(true);
+    attention_->hide();
+    side->addWidget(attention_);
 
-    auto* markBox = new QGroupBox(QStringLiteral("While recording"));
-    auto* ml = new QVBoxLayout(markBox);
-    auto* hint = new QLabel(QStringLiteral("Change one setting at a time in the vendor software. Just before each change, press "
-                                           "<b>Mark</b> (or the space bar) and say what you change:"));
+    QBoxLayout* ml = nullptr;
+    auto* markBox = card(QStringLiteral("While recording"), &ml);
+    auto* hint = new QLabel(QStringLiteral("Change one setting at a time. Just before each change, press <b>Mark</b> (space bar)."));
+    hint->setObjectName(QStringLiteral("dimText"));
     hint->setWordWrap(true);
     ml->addWidget(hint);
     note_ = new QLineEdit;
-    note_->setPlaceholderText(QStringLiteral("What you are about to change (optional), then Enter"));
+    note_->setPlaceholderText(QStringLiteral("What you are about to change (optional), Enter marks"));
     connect(note_, &QLineEdit::returnPressed, this, &MainWindow::doMark);
     ml->addWidget(note_);
     auto* mb = new QHBoxLayout;
@@ -275,6 +371,7 @@ QWidget* MainWindow::buildRecordPage() {
     mark_->setMinimumHeight(40);
     connect(mark_, &QPushButton::clicked, this, &MainWindow::doMark);
     sync_ = new QPushButton(QStringLiteral("Sync"));
+    sync_->setObjectName(QStringLiteral("sync"));
     sync_->setMinimumHeight(40);
     sync_->setToolTip(QStringLiteral("Press at the same moment as Sync in Tick on the instrument PC: it lines up the two clocks"));
     connect(sync_, &QPushButton::clicked, this, [this] { rec_.sync(); });
@@ -286,20 +383,24 @@ QWidget* MainWindow::buildRecordPage() {
     auto* sc = new QShortcut(QKeySequence(Qt::Key_Space), page);
     connect(sc, &QShortcut::activated, this, &MainWindow::doMark);
 
-    auto* liveLabel = new QLabel(QStringLiteral("<b>Traffic</b> as it arrives"));
-    outer->addWidget(liveLabel);
+    QBoxLayout* lb = nullptr;
+    auto* liveCard = card(QStringLiteral("Traffic as it arrives"), &lb);
+    lb->setContentsMargins(4, 12, 4, 4);
     live_ = new RowModel(this);
     liveView_ = table(live_);
-    outer->addWidget(liveView_, 2);
+    lb->addWidget(liveView_);
+    liveCard->setMinimumHeight(170);
+    outer->addWidget(liveCard, 0);
     return page;
 }
 
 QWidget* MainWindow::buildTimelinePage() {
     auto* page = new QWidget;
     auto* v = new QVBoxLayout(page);
+    v->setContentsMargins(16, 12, 16, 8);
+    v->setSpacing(10);
     auto* head = new QHBoxLayout;
-    auto* back = new QPushButton(QStringLiteral("◀  New recording"));
-    connect(back, &QPushButton::clicked, this, &MainWindow::showRecordPage);
+
     tlTitle_ = new QLabel;
     tlTitle_->setObjectName(QStringLiteral("title"));
     auto* addTick = new QPushButton(QStringLiteral("Add Tick session…"));
@@ -313,8 +414,6 @@ QWidget* MainWindow::buildTimelinePage() {
         const QString f = project_.isSaved() ? project_.folder : (project_.sessions.empty() ? QString() : project_.sessions[0].session.folder);
         if (!f.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(f));
     });
-    head->addWidget(back);
-    head->addSpacing(12);
     head->addWidget(tlTitle_, 1);
     head->addWidget(addTick);
     head->addWidget(clocks);
@@ -358,7 +457,11 @@ QWidget* MainWindow::buildTimelinePage() {
     ll->addLayout(barRow);
     rows_ = new RowModel(this);
     rowView_ = table(rows_);
-    ll->addWidget(rowView_, 1);
+    QBoxLayout* rb = nullptr;
+    auto* rowsCard = card(QString(), &rb);
+    rb->setContentsMargins(4, 4, 4, 4);
+    rb->addWidget(rowView_);
+    ll->addWidget(rowsCard, 1);
     split->addWidget(lower);
     split->setStretchFactor(0, 3);
     split->setStretchFactor(1, 2);
@@ -421,9 +524,8 @@ void MainWindow::refreshConnections() {
         if (g.ready) portA_ = g.a, portB_ = g.b;
         tapText_->setText(g.ready ? QStringLiteral("<b>Serial tap ready.</b> ") + g.sentence.mid(18) : g.sentence);
         setDot(tapDot_, g.ready ? "ok" : "warn");
-        speedText_->setText(g.ready ? QStringLiteral("Speed: %1 baud, %2. Not sure? Press Find speed while the software talks.")
-                                          .arg(c.line.baud).arg(c.line.text())
-                                    : QString());
+        speedText_->setText(g.ready ? QStringLiteral("%1 baud, %2").arg(c.line.baud).arg(c.line.text()) : QString());
+        speedText_->setToolTip(QStringLiteral("Not sure of the speed? Press Find speed while the vendor software talks to the instrument."));
     }
     swap_->setVisible(!demo_);
     speed_->setVisible(!demo_);
@@ -488,8 +590,19 @@ void MainWindow::updateRecordUi() {
     demoButton_->setEnabled(!on);
     useCamera_->setEnabled(!on);
     cameraBox_->setEnabled(!on);
+    attention_->setVisible(false);
     if (on) {
         const QJsonObject st = rec_.status();
+        const QJsonObject s0 = st.value(QStringLiteral("stats")).toObject();
+        if (!demo_ && rec_.elapsed() > 8 && s0.contains(QStringLiteral("bytes_a"))) {
+            const bool noA = s0.value(QStringLiteral("bytes_a")).toInt() == 0, noB = s0.value(QStringLiteral("bytes_b")).toInt() == 0;
+            if (noA || noB) {
+                attention_->setText(noA && noB ? QStringLiteral("Nothing on the link yet. Is the vendor software talking to the instrument, and the tap plugged in between?")
+                                               : QStringLiteral("No data from the %1 side yet. Check that lead of the tap, or the speed (Find speed).")
+                                                     .arg(noA ? QStringLiteral("PC") : QStringLiteral("instrument")));
+                attention_->setVisible(true);
+            }
+        }
         const QJsonObject s = st.value(QStringLiteral("stats")).toObject();
         recStatus_->setText(QStringLiteral("<b>Recording %1</b><br>%2 bytes from the PC, %3 from the instrument · %4 marks · %5 pictures")
                                 .arg(clockText(rec_.elapsed(), false))
@@ -500,7 +613,10 @@ void MainWindow::updateRecordUi() {
     } else if (!ready) {
         recStatus_->setText(QStringLiteral("Connect the serial tap (or a camera) to record."));
     } else {
-        recStatus_->setText(QStringLiteral("Recordings are saved in %1").arg(QDir::toNativeSeparators(workspaceDir())));
+        QString where = QDir::toNativeSeparators(workspaceDir());
+        if (where.startsWith(QDir::homePath())) where = QStringLiteral("~") + where.mid(QDir::homePath().size());
+        recStatus_->setText(recStatus_->fontMetrics().elidedText(QStringLiteral("Saved in %1").arg(where), Qt::ElideMiddle, 460));
+        recStatus_->setToolTip(QDir::toNativeSeparators(workspaceDir()));
     }
 }
 
@@ -549,7 +665,7 @@ void MainWindow::findSpeed() {
     pd.close();
     if (g.baud) settings().setValue(QStringLiteral("baud"), g.baud);
     refreshConnections();
-    speedText_->setText(g.sentence);
+    QMessageBox::information(this, QStringLiteral("Find speed"), g.sentence);
 }
 
 void MainWindow::advancedDialog() {
@@ -643,6 +759,7 @@ void MainWindow::advancedDialog() {
 
 void MainWindow::showRecordPage() {
     pages_->setCurrentIndex(0);
+    headerSub_->setText(QStringLiteral("New recording"));
     refreshConnections();
 }
 
@@ -664,7 +781,8 @@ bool MainWindow::openRecording(const QString& path) {
 void MainWindow::reloadTimeline(double keep) {
     screen_.reset();
     tl_.build(project_);
-    tlTitle_->setText(QStringLiteral("<b>%1</b> · %2").arg(project_.name.toHtmlEscaped(), clockText(tl_.end - tl_.start, false)));
+    tlTitle_->setText(QStringLiteral("%1 · %2").arg(project_.name.toHtmlEscaped(), clockText(tl_.end - tl_.start, false)));
+    headerSub_->setText(QStringLiteral("Recording %1").arg(project_.name));
     QStringList info;
     for (const ProjectSession& s : project_.sessions) {
         QString clock;

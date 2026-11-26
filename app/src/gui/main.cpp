@@ -9,12 +9,12 @@
 //   LIBRETAP_SHOT_ADD=folder               add that session (e.g. a Tick session) to the opened recording
 //   LIBRETAP_SHOT_TIME=seconds             move the timeline to that time after the start
 #include <QApplication>
-#include <QPalette>
 #include <QTimer>
 
 #include "core/util.h"
 #include "mainwindow.h"
 #include "splash.h"
+#include "theme.h"
 
 using namespace lt::gui;
 
@@ -24,30 +24,7 @@ int main(int argc, char** argv) {
     QApplication::setApplicationName(QStringLiteral("LibreTap"));
     QApplication::setApplicationVersion(QStringLiteral(LIBRETAP_VERSION));
     QApplication::setWindowIcon(appIcon());
-    {
-        // accents only (teal from the splash, red for recording, amber for marks): light and dark themes both work
-        QPalette pal = app.palette();
-        pal.setColor(QPalette::Highlight, QColor(0x1f8f87));
-        pal.setColor(QPalette::HighlightedText, Qt::white);
-        app.setPalette(pal);
-        app.setStyleSheet(QStringLiteral(
-            "QGroupBox { font-weight: 600; }"
-            "QGroupBox::title { color: #1f8f87; }"
-            "QLabel#dot { border-radius: 7px; background: #9aa3ad; margin-top: 2px; }"
-            "QLabel#dot[state=\"ok\"] { background: #2eaa5c; }"
-            "QLabel#dot[state=\"warn\"] { background: #e0a800; }"
-            "QPushButton#record { background: #fbeaea; color: #b3261e; border: 2px solid #d9a3a0; border-radius: 8px;"
-            "  font-weight: 700; font-size: 18pt; }"
-            "QPushButton#record:hover { background: #f6dcdc; }"
-            "QPushButton#record[recording=\"true\"] { background: #c62828; color: white; border-color: #a31f1f; }"
-            "QPushButton#record:disabled { color: rgba(179,38,30,110); border-color: rgba(217,163,160,110); }"
-            "QPushButton#mark { background: #fdf0dc; color: #8a4b00; border: 2px solid #e8b264; border-radius: 6px; font-weight: 700; font-size: 12pt; }"
-            "QPushButton#mark:disabled { color: rgba(138,75,0,100); border-color: rgba(232,178,100,100); }"
-            "QPushButton#link { color: #1f8f87; text-decoration: underline; border: none; padding: 2px; }"
-            "QLabel#title { font-size: 13pt; }"
-            "QHeaderView::section { background: rgba(31,143,135,24); border: none;"
-            "  border-right: 1px solid rgba(31,143,135,40); border-bottom: 1px solid rgba(31,143,135,110); padding: 3px 6px; }"));
-    }
+    theme::apply(app);
     if (qEnvironmentVariableIsSet("LIBRETAP_SPLASH_PNG")) {
         const QString v = qEnvironmentVariable("LIBRETAP_SPLASH_PNG");
         return drawSplash(2.0, v.section(QLatin1Char(','), 1) != QLatin1String("light")).save(v.section(QLatin1Char(','), 0, 0)) ? 0 : 1;

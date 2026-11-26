@@ -7,7 +7,7 @@
 
 namespace lt::gui {
 
-constexpr int kSplashW = 640, kSplashH = 330;
+constexpr int kSplashW = 680, kSplashH = 330;
 
 QImage drawSplash(qreal dpr = 1.0, bool dark = true);   // logical size kSplashW × kSplashH
 QImage drawIcon(int size);                              // the program icon: a stethoscope on a signal wire

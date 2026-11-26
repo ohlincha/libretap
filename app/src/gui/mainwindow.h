@@ -88,6 +88,8 @@ private:
     QPushButton *record_ = nullptr, *mark_ = nullptr, *sync_ = nullptr;
     QLineEdit* note_ = nullptr;
     QLabel* recStatus_ = nullptr;
+    QLabel* attention_ = nullptr;      // amber: something needs the operator's attention
+    QLabel* headerSub_ = nullptr;
     RowModel* live_ = nullptr;
     QTableView* liveView_ = nullptr;
     QTimer* tick_ = nullptr;
