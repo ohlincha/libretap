@@ -138,6 +138,16 @@ Tick session details (Tick 0.2; `recorder` is `"Tick 0.2.0"`, or `"TickScreen 0.
 - `call` events: `PurgeComm` (`flags`, hex), `SetupComm` (`in_queue`, `out_queue`), `DeviceIoControl` on a COM handle.
 - `status`/`error` texts tell when Tick started the program, when its listener became active, when the program
   ended (with exit code), and when listener records were lost because Tick could not keep up.
+- Tick for Linux (0.3) writes the same format. `os` is like `"Linux 6.12.1 x86_64"`. Its `api-serial` sources are
+  named after the device (`/dev/ttyUSB0` -> id `ttyusb0`, `/dev/pts/3` -> `pts3`, a path outside /dev -> its file name)
+  and carry `device` (the path). `data` calls are `read`, `write`, `readv`, `writev`. `config` events come from
+  `tcsetattr` or `ioctl TCSETS` (`baud`, `bits`, `parity`, `stop`, `rts: "handshake"` + `cts_flow` for RTS/CTS,
+  `xonxoff`, `raw` or `canonical`, `vmin`, `vtime`, and the raw `termios` flags) or from `ioctl TIOCMSET/TIOCMBIS/
+  TIOCMBIC` (`dtr`, `rts` `on`/`off`) and `ioctl TIOCSBRK/TIOCCBRK`/`tcsendbreak` (`break`); `call` events from
+  `tcflush` (`queue` `in`/`out`/`both`) and other ioctls (`code`). A failed open of a serial-looking device is an
+  `open` event with `ok: false` and `error` (text). Screen sources are labelled with the X display; `cursor` is false
+  (the pointer is not drawn on Linux). `tick/program-output.log` holds the started program's terminal output when
+  Tick runs with its terminal UI.
 - `files/` holds the program's small settings files (`*.ini`, `*.cfg`, `*.cnf`, `*.conf`, `*.set`, `*.par`, `*.prm`
   from its folder, up to 1 MB each) copied before it started; `tick/` holds the listener Tick loaded into the program: `TickHook.dll`, or for a
   64-bit program `TickHook64.dll` and `TickHelper64.exe` (readers ignore this folder).

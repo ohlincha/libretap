@@ -2,32 +2,25 @@
  * (format: docs/FORMAT.md).  events.jsonl is appended line by line and
  * flushed at least once a second, so a crash or a pulled USB stick leaves a
  * readable session. */
-#include "tick.h"
-#include <tlhelp32.h>
+#include "core.h"
 
-volatile LONG g_frames_stored, g_mark_n, g_sync_n;
+volatile long g_frames_stored, g_mark_n, g_sync_n;
 
 #define MAXSRC 32
 static struct { char id[16]; char *json; } srcs[MAXSRC];
 static int nsrc;
 
-static CRITICAL_SECTION cs;
-static int cs_ready;
 static volatile int active;
-static HANDLE hev = INVALID_HANDLE_VALUE;
-static char root[MAX_PATH], dir[MAX_PATH];
+static void *hev;
+static char root[TICK_PATH], dir[TICK_PATH];
 static u64 started_us, ended_us, bytes;
-static DWORD last_flush;
+static u32 last_flush;
 static int write_failed, dirty;
 static char note[256];
-static char capture_proc[MAX_PATH];
+static char capture_proc[TICK_PATH];
 
-static void lock(void)
-{
-    if (!cs_ready) { InitializeCriticalSection(&cs); cs_ready = 1; }
-    EnterCriticalSection(&cs);
-}
-static void unlock(void) { LeaveCriticalSection(&cs); }
+static void lock(void) { p_lock(); }
+static void unlock(void) { p_unlock(); }
 
 void copy_str(char *d, const char *s, u32 cap)
 {
@@ -37,22 +30,10 @@ void copy_str(char *d, const char *s, u32 cap)
     d[i] = 0;
 }
 
-static void cat_str(char *d, const char *s, u32 cap)
+void cat_str(char *d, const char *s, u32 cap)
 {
     u32 n = (u32)strlen(d);
     if (n < cap) copy_str(d + n, s, cap - n);
-}
-
-void ansi_to_utf8(sbuf *b, const char *s)
-{
-    int n;
-    u16 *w;
-    if (!s || !*s) return;
-    n = MultiByteToWideChar(CP_ACP, 0, s, -1, 0, 0);
-    w = n > 0 ? rt_alloc((u32)n * 2 + 2) : 0;
-    if (w && MultiByteToWideChar(CP_ACP, 0, s, -1, (LPWSTR)w, n) > 0) sb_utf16(b, w, 0xffffffffu);
-    else sb_str(b, s);
-    rt_free(w);
 }
 
 int session_active(void) { return active; }
@@ -60,26 +41,18 @@ const char *session_dir(void) { return dir; }
 const char *session_root(void) { return root; }
 u32 session_bytes_kb(void) { return (u32)(bytes >> 10); }
 
-static int write_all(HANDLE h, const void *p, u32 n)
-{
-    DWORD w = 0;
-    return WriteFile(h, p, n, &w, 0) && w == n;
-}
 
 static void write_session_json(void)
 {
     sbuf b;
-    OSVERSIONINFOA ov;
-    char host[MAX_COMPUTERNAME_LENGTH + 2];
-    DWORD hn = sizeof host;
-    char path[MAX_PATH];
-    HANDLE h;
+    char host[64];
+    char path[TICK_PATH];
+    void *h;
     int i;
 
     sb_init(&b, 2048);
     sb_str(&b, "{\n  \"format\": \"libretap-session\",\n  \"version\": 1,\n  \"recorder\": \"" TICK_NAME "\",\n  \"host\": ");
-    host[0] = 0;
-    if (!GetComputerNameA(host, &hn)) host[0] = 0;
+    p_hostname(host, sizeof host);
     {
         sbuf u;
         sb_init(&u, 64);
@@ -87,22 +60,8 @@ static void write_session_json(void)
         sb_json(&b, u.p, u.len);
         sb_free(&u);
     }
-    sb_str(&b, ",\n  \"os\": \"Windows ");
-    memset(&ov, 0, sizeof ov);
-    ov.dwOSVersionInfoSize = sizeof ov;
-    if (GetVersionExA(&ov)) {
-        sb_u32(&b, ov.dwMajorVersion); sb_putc(&b, '.'); sb_u32(&b, ov.dwMinorVersion);
-        sb_str(&b, " build ");
-        sb_u32(&b, ov.dwPlatformId == VER_PLATFORM_WIN32_NT ? ov.dwBuildNumber : (ov.dwBuildNumber & 0xffff));
-        if (ov.szCSDVersion[0] && ov.szCSDVersion[0] != ' ') {
-            sbuf u;
-            sb_init(&u, 64);
-            ansi_to_utf8(&u, ov.szCSDVersion);
-            sb_putc(&b, ' ');
-            for (i = 0; i < (int)u.len; i++) if (u.p[i] != '"' && u.p[i] != '\\') sb_putc(&b, u.p[i]);
-            sb_free(&u);
-        }
-    }
+    sb_str(&b, ",\n  \"os\": \"");
+    p_os(&b);
     sb_str(&b, "\",\n  \"started\": \"");
     clock_iso(&b, started_us);
     sb_str(&b, "\",\n");
@@ -147,45 +106,37 @@ static void write_session_json(void)
     }
     sb_str(&b, "\n}\n");
 
-    copy_str(path, dir, MAX_PATH);
-    cat_str(path, "session.json", MAX_PATH);
-    h = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-    if (h != INVALID_HANDLE_VALUE) {
-        if (!write_all(h, b.p, b.len)) write_failed = 1;
-        FlushFileBuffers(h);
-        CloseHandle(h);
+    copy_str(path, dir, TICK_PATH);
+    cat_str(path, "session.json", TICK_PATH);
+    h = pf_create(path, 0);
+    if (h) {
+        if (!pf_write(h, b.p, b.len)) write_failed = 1;
+        pf_flush(h);
+        pf_close(h);
     } else write_failed = 1;
     sb_free(&b);
 }
 
-static int dir_ok(const char *d)
-{
-    DWORD a;
-    CreateDirectoryA(d, 0);
-    a = GetFileAttributesA(d);
-    return a != 0xffffffffu && (a & FILE_ATTRIBUTE_DIRECTORY);
-}
 
 /* try to create <base>\<name> with an events.jsonl in it */
 static int try_root(const char *base)
 {
-    SYSTEMTIME st;
-    char host[MAX_COMPUTERNAME_LENGTH + 2], name[80], path[MAX_PATH];
-    DWORD hn = sizeof host;
+    tick_tm st;
+    char host[64], name[80], path[TICK_PATH];
     sbuf b;
-    int k, i;
+    int k, i, r;
 
     if (!base[0]) return 0;
-    copy_str(root, base, MAX_PATH);
-    if (root[strlen(root) - 1] != '\\') cat_str(root, "\\", MAX_PATH);
-    if (!dir_ok(root)) return 0;
+    copy_str(root, base, TICK_PATH);
+    if (root[strlen(root) - 1] != PSEP[0]) cat_str(root, PSEP, TICK_PATH);
+    if (!p_mkdir(root)) return 0;
 
-    clock_local(started_us, &st);
-    if (!GetComputerNameA(host, &hn)) host[0] = 0;
+    clock_tm(started_us, &st);
+    p_hostname(host, sizeof host);
     sb_init(&b, 64);
-    sb_u32w(&b, st.wYear, 4); sb_u32w(&b, st.wMonth, 2); sb_u32w(&b, st.wDay, 2);
+    sb_u32w(&b, (u32)st.year, 4); sb_u32w(&b, (u32)st.mon, 2); sb_u32w(&b, (u32)st.day, 2);
     sb_putc(&b, '-');
-    sb_u32w(&b, st.wHour, 2); sb_u32w(&b, st.wMinute, 2); sb_u32w(&b, st.wSecond, 2);
+    sb_u32w(&b, (u32)st.hour, 2); sb_u32w(&b, (u32)st.min, 2); sb_u32w(&b, (u32)st.sec, 2);
     if (host[0]) {
         sb_putc(&b, '-');
         for (i = 0; host[i] && i < 24; i++) {
@@ -198,43 +149,33 @@ static int try_root(const char *base)
     copy_str(name, b.p, sizeof name);
     sb_free(&b);
     for (k = 1; k < 20; k++) {
-        copy_str(dir, root, MAX_PATH);
-        cat_str(dir, name, MAX_PATH);
+        copy_str(dir, root, TICK_PATH);
+        cat_str(dir, name, TICK_PATH);
         if (k > 1) {
             char s[4];
             s[0] = '-'; s[1] = (char)('0' + k / 10); s[2] = (char)('0' + k % 10); s[3] = 0;
             if (k < 10) { s[1] = (char)('0' + k); s[2] = 0; }
-            cat_str(dir, s, MAX_PATH);
+            cat_str(dir, s, TICK_PATH);
         }
-        if (CreateDirectoryA(dir, 0)) break;
-        if (GetLastError() != ERROR_ALREADY_EXISTS) return 0;
+        r = p_mkdir_new(dir);
+        if (r == 1) break;
+        if (r < 0) return 0;
     }
     if (k == 20) return 0;
-    cat_str(dir, "\\", MAX_PATH);
-    copy_str(path, dir, MAX_PATH);
-    cat_str(path, "events.jsonl", MAX_PATH);
-    hev = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
-    if (hev == INVALID_HANDLE_VALUE) {
-        RemoveDirectoryA(dir);
+    cat_str(dir, PSEP, TICK_PATH);
+    copy_str(path, dir, TICK_PATH);
+    cat_str(path, "events.jsonl", TICK_PATH);
+    hev = pf_create(path, 1);
+    if (!hev) {
+        p_rmdir(dir);
         return 0;
     }
     return 1;
 }
 
-static int documents_dir(char *out)
-{
-    typedef BOOL (WINAPI *SHGSFP)(HWND, LPSTR, int, BOOL);
-    HMODULE m = LoadLibraryA("shell32.dll");
-    SHGSFP f = m ? (SHGSFP)(void *)GetProcAddress(m, "SHGetSpecialFolderPathA") : 0;
-    int ok = 0;
-    if (f && f(0, out, 5 /* CSIDL_PERSONAL */, FALSE)) ok = 1;
-    if (m) FreeLibrary(m);
-    return ok;
-}
-
 int session_start(char *err, u32 errcap)
 {
-    char base[MAX_PATH];
+    char base[TICK_PATH];
     int ok = 0;
     sbuf b;
 
@@ -251,27 +192,28 @@ int session_start(char *err, u32 errcap)
     g_sync_n = 0;
     if (g_cfg.dir[0]) ok = try_root(g_cfg.dir);
     if (!ok) {
-        copy_str(base, g_exe_dir, MAX_PATH);
-        cat_str(base, "TickSessions", MAX_PATH);
+        copy_str(base, g_exe_dir, TICK_PATH);
+        cat_str(base, "TickSessions", TICK_PATH);
         ok = try_root(base);
     }
-    if (!ok && documents_dir(base)) {
-        cat_str(base, "\\TickSessions", MAX_PATH);
+    if (!ok && p_documents(base, TICK_PATH)) {
+        cat_str(base, PSEP "TickSessions", TICK_PATH);
         ok = try_root(base);
     }
-    if (!ok && GetTempPathA(MAX_PATH, base)) {
-        cat_str(base, "TickSessions", MAX_PATH);
+    if (!ok && p_temp(base, TICK_PATH)) {
+        if (base[0] && base[strlen(base) - 1] != PSEP[0]) cat_str(base, PSEP, TICK_PATH);
+        cat_str(base, "TickSessions", TICK_PATH);
         ok = try_root(base);
     }
     if (!ok) {
         unlock();
-        copy_str(err, "Could not create a session folder (next to Tick.exe, in Documents or in TEMP).", errcap);
+        copy_str(err, "Could not create a session folder (next to Tick, in Documents/home or in the temp folder).", errcap);
         return 0;
     }
     session_mkdir("frames");
     active = 1;
     write_session_json();
-    last_flush = GetTickCount();
+    last_flush = p_ms();
     unlock();
 
     sb_init(&b, 256);
@@ -289,9 +231,9 @@ void session_stop(void)
     lock();
     active = 0;
     ended_us = clock_now_us();
-    FlushFileBuffers(hev);
-    CloseHandle(hev);
-    hev = INVALID_HANDLE_VALUE;
+    pf_flush(hev);
+    pf_close(hev);
+    hev = 0;
     write_session_json();
     {
         int i;
@@ -336,13 +278,13 @@ void ev_end(sbuf *b)
     if (b->oom) return;
     urgent = has_kind(b, "mark") || has_kind(b, "sync") || has_kind(b, "error");
     lock();
-    if (active && hev != INVALID_HANDLE_VALUE) {
-        DWORD now = GetTickCount();
-        if (!write_all(hev, b->p, b->len)) write_failed = 1;
+    if (active && hev) {
+        u32 now = p_ms();
+        if (!pf_write(hev, b->p, b->len)) write_failed = 1;
         else { bytes += b->len; dirty = 1; }
         /* marks and syncs are flushed at once, everything else at most 1 s later */
         if (urgent || now - last_flush >= 1000) {
-            FlushFileBuffers(hev);
+            pf_flush(hev);
             last_flush = now;
             dirty = 0;
         }
@@ -365,7 +307,7 @@ int session_has_source(const char *id)
 {
     int i, r = 0;
     lock();
-    for (i = 0; i < nsrc; i++) if (lstrcmpA(srcs[i].id, id) == 0) r = 1;
+    for (i = 0; i < nsrc; i++) if (strcmp(srcs[i].id, id) == 0) r = 1;
     unlock();
     return r;
 }
@@ -374,7 +316,7 @@ void session_add_source(const char *id, const char *json)
 {
     int i;
     lock();
-    for (i = 0; i < nsrc; i++) if (lstrcmpA(srcs[i].id, id) == 0) break;
+    for (i = 0; i < nsrc; i++) if (strcmp(srcs[i].id, id) == 0) break;
     if (i == nsrc && nsrc < MAXSRC && active) {
         u32 n = (u32)strlen(json);
         srcs[nsrc].json = rt_alloc(n + 1);
@@ -390,24 +332,24 @@ void session_add_source(const char *id, const char *json)
 
 void session_mkdir(const char *rel)
 {
-    char path[MAX_PATH];
-    copy_str(path, dir, MAX_PATH);
-    cat_str(path, rel, MAX_PATH);
-    CreateDirectoryA(path, 0);
+    char path[TICK_PATH];
+    copy_str(path, dir, TICK_PATH);
+    cat_str(path, rel, TICK_PATH);
+    p_mkdir(path);
 }
 
 int session_write_file(const char *rel, const void *p, u32 n)
 {
-    char path[MAX_PATH];
-    HANDLE h;
+    char path[TICK_PATH];
+    void *h;
     int ok;
-    copy_str(path, dir, MAX_PATH);
-    cat_str(path, rel, MAX_PATH);
-    h = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    ok = write_all(h, p, n);
-    CloseHandle(h);
-    if (!ok) { DeleteFileA(path); return 0; }
+    copy_str(path, dir, TICK_PATH);
+    cat_str(path, rel, TICK_PATH);
+    h = pf_create(path, 0);
+    if (!h) return 0;
+    ok = pf_write(h, p, n);
+    pf_close(h);
+    if (!ok) { p_unlink(path); return 0; }
     lock();
     bytes += n;
     unlock();
@@ -418,9 +360,9 @@ int session_write_file(const char *rel, const void *p, u32 n)
 void session_flush_if_due(void)
 {
     lock();
-    if (active && dirty && GetTickCount() - last_flush >= 1000) {
-        FlushFileBuffers(hev);
-        last_flush = GetTickCount();
+    if (active && dirty && p_ms() - last_flush >= 1000) {
+        pf_flush(hev);
+        last_flush = p_ms();
         dirty = 0;
     }
     unlock();
@@ -434,31 +376,4 @@ void session_set_capture(const char *process)
     copy_str(capture_proc, process, sizeof capture_proc);
     if (active) write_session_json();
     unlock();
-}
-
-void process_name(DWORD pid, char *out)
-{
-    typedef HANDLE (WINAPI *SNAP)(DWORD, DWORD);
-    typedef BOOL (WINAPI *P32)(HANDLE, LPPROCESSENTRY32);
-    HMODULE k = GetModuleHandleA("kernel32.dll");
-    SNAP snap = (SNAP)(void *)GetProcAddress(k, "CreateToolhelp32Snapshot");
-    P32 first = (P32)(void *)GetProcAddress(k, "Process32First");
-    P32 next = (P32)(void *)GetProcAddress(k, "Process32Next");
-    HANDLE s;
-    PROCESSENTRY32 pe;
-    out[0] = 0;
-    if (!snap || !first || !next) return;
-    s = snap(TH32CS_SNAPPROCESS, 0);
-    if (s == INVALID_HANDLE_VALUE || !s) return;
-    memset(&pe, 0, sizeof pe);
-    pe.dwSize = sizeof pe;
-    if (first(s, &pe)) do {
-        if (pe.th32ProcessID == pid) {
-            const char *b = pe.szExeFile, *p;
-            for (p = pe.szExeFile; *p; p++) if (*p == '\\') b = p + 1;
-            copy_str(out, b, MAX_PATH);
-            break;
-        }
-    } while (next(s, &pe));
-    CloseHandle(s);
 }

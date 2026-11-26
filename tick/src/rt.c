@@ -53,6 +53,12 @@ size_t strlen(const char *s)
     return (size_t)(p - s);
 }
 
+int strcmp(const char *a, const char *b)
+{
+    while (*a && *a == *b) { a++; b++; }
+    return (int)(u8)*a - (int)(u8)*b;
+}
+
 void *rt_alloc(u32 n)
 {
     return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, n ? n : 1);

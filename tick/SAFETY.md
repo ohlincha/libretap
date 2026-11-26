@@ -91,6 +91,18 @@ antivirus product.
 slower anyway, open *Advanced...* and take a screenshot every 1000 or 2000 ms instead of 500; or press Stop. The
 listener adds only a memory copy to each serial call (not measured on an old PC). *Not tested* on a really old PC (Pentium II class).
 
+## Tick for Linux
+
+The same rules hold: nothing is installed, no root is needed, the session folder (`TickSessions` next to `tick`,
+then your home folder, then `/tmp`) holds what Tick writes. Two small exceptions: while a program is listened to,
+the shared buffer lives in `/dev/shm/tick-ring-*` (1 MB; removed when Tick ends, or by the next Tick if Tick was
+killed), and `libtickhook.so` goes to `$XDG_RUNTIME_DIR` or `/tmp` if the session folder cannot hold programs. The
+listened-to program runs in its own process group: closing Tick's terminal or pressing keys in it does not stop
+the program. *Tested natively under Xvfb:* kill -9 of Tick while listening (the program finished all 20 exchanges),
+kill -9 of the program (Tick noted "ended (signal 9)" and kept recording), session folder deleted while recording
+and listening (Tick kept running, the program finished normally), quitting Tick while the program runs (the
+program went on). Not tested on a real old Linux instrument PC.
+
 ## Before your first session
 
 1. **Back up the vendor program's settings.** Copy its program folder (or at least its `.ini`/`.cfg` files) and

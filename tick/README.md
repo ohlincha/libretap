@@ -51,6 +51,54 @@ C:\path\VENDOR.EXE [arguments]` starts recording and the program (handy in a sho
 
 The session format is described in [../docs/FORMAT.md](../docs/FORMAT.md).
 
+## Linux
+
+`build/linux/tick` (about 1 MB, one static x86-64 binary, no root, nothing to install) does the same on Linux
+PCs (and lets LibreTap be tested end to end on a Linux desktop):
+
+```
+tick                                   # terminal UI: big clock; keys s = start/stop, m = mark (+note, Enter), y = sync, q = quit
+tick run [options] -- PROGRAM [ARGS]   # recommended for the serial port: record and start PROGRAM with the listener
+tick ctl status|start|stop|mark NOTE|sync|quit   # control a running tick (for scripts and AI agents; JSON answers)
+options: --dir DIR  --interval MS  --full-every N  --no-screen  --no-titles  --start  --no-tui  --until-exit  --control PATH
+```
+
+![Tick for Linux in an xterm](docs/tick-linux.png)
+
+- Screen: spoken X11 protocol directly over the display's socket (GetImage of the root window; no libX11
+  needed), so it works under Xorg, Xvfb and for X programs on XWayland. On a Wayland-only desktop it says that
+  screen recording is not supported yet and records only the listener, marks and syncs. The terminal Tick runs in
+  is painted grey in the pictures when the terminal sets `WINDOWID` (xterm, konsole, ...). The mouse pointer
+  and the "vendor program's windows only" option are Windows-only for now. Active window titles come from the
+  window manager (`_NET_ACTIVE_WINDOW`).
+- Serial listener: `tick run` starts the program with `LD_PRELOAD=libtickhook.so` (carried inside `tick`, written
+  to `<session>/tick/`, or `$XDG_RUNTIME_DIR`/`/tmp` if the session folder is on a `noexec` mount). The library
+  defines `open`/`openat`/`read`/`write`/`readv`/`writev`/`ioctl`/`tcsetattr`/`tcflush`/`tcsendbreak`/`close`
+  (+ `_FORTIFY_SOURCE` variants), does the real work as raw system calls and records calls on terminal devices
+  (serial ports, USB adapters, pseudo-terminals) into the same lock-free ring as on Windows, in `/dev/shm`.
+  Programs the vendor program starts are listened to as well. It needs only `getenv` and `__errno_location` from
+  libc (any glibc since 2.2.5, or musl). The status line says in words what was found ("PROGRAM opened
+  /dev/ttyUSB0: 9600 baud, 8N1, no handshake"). The program runs in its own process group with its terminal
+  output in `<session>/tick/program-output.log` (when the terminal UI is used).
+- Limits: statically linked and setuid programs ignore `LD_PRELOAD` (they run normally, unrecorded); 32-bit
+  programs cannot load the 64-bit library (same); serial I/O through stdio (`fopen`/`fprintf` on the port) or
+  io_uring is not seen; no attaching to a running program. Runs on x86-64 Linux with kernel 3.2 or later; no
+  32-bit (i686) build yet (needs a 32-bit libc to link against).
+- Build: `make linux` (gcc, glibc static libs; `make linux-check` checks it is static and what the library
+  imports). Tests: `tests/linux-test.sh SCRATCH` (Xvfb, xterm, xclock, xdotool, ImageMagick).
+
+## macOS (plan, not built)
+
+- Screen: `CGDisplayCreateImage` (10.6-14) or ScreenCaptureKit (12.3+); both need the *Screen Recording*
+  permission, which the user grants once in System Settings (Tick must explain this on first start).
+- Listener: `DYLD_INSERT_LIBRARIES=libtickhook.dylib` with interposing (`__DATA,__interpose`) for
+  open/read/write/ioctl/tcsetattr/close, the same ring in shared memory. Works only for programs that are not
+  hardened/notarised with library validation and not protected by SIP: fine for old vendor software, not for
+  current App Store or notarised apps. The ring, session writer, PNG and diff code are shared as on Linux.
+- CI: GitHub's macOS runners can build both and run the listener against a fake vendor program on a
+  pseudo-terminal; screen capture cannot be tested there (no permission prompt can be answered headless), so it
+  needs one manual test on a real Mac.
+
 ## How it works
 
 - Plain C, Win32 API only, no C runtime: own entry point, `HeapAlloc`, own text and number formatting. i686,
@@ -87,6 +135,7 @@ and python3 for the native tests.
 ```
 make              # build/Tick.exe (TickHook.dll, TickHook64.dll, TickHelper64.exe inside) and build/TickScreen.exe
 make check        # import allow-list check (tools/check-imports.sh) + native unit tests
+make linux        # build/linux/tick (static) with libtickhook.so inside
 make tools-test   # test helpers for Wine runs: tickctl.exe, fakevendor.exe, fakevendor64.exe
 WINE=/path/to/wine tests/wine-test.sh win2k /tmp/tickwine     # end-to-end under Wine + Xvfb
 WINE=/path/to/wine tests/wine-safety.sh win2k /tmp/tickwine   # worst cases (kill Tick, kill program, ...)
@@ -99,7 +148,9 @@ TickScreen.exe or TickHook.dll imports a function that is not in
 
 ## Tested and untested
 
-Tested (2026-11-26): native unit tests (deflate/PNG round trip through Python's zlib, screen diff, ring buffer with
+Tested (2026-11-26): Tick for Linux natively under Xvfb (terminal UI in xterm with xclock running, `tick run`
+with a fake vendor program on a pseudo-terminal, control socket, kill -9 of tick / of the program, session folder
+removed, quit while the program runs; `tests/linux-test.sh`); native unit tests (deflate/PNG round trip through Python's zlib, screen diff, ring buffer with
 4 writer threads, JSON/UTF-8 text); Tick.exe under Wine 11.20 (WoW64) set to Windows 2000, XP and 7, in Xvfb:
 screen recording, Mark/Enter/Sync, Stop/Start, `/run` with a test program talking to a fake instrument on a
 pseudo-terminal mapped to COM1 (open, settings, timeouts, DTR, purge, writes, reads, overlapped reads, late-bound

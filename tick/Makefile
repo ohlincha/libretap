@@ -28,7 +28,7 @@ LDFLAGS := -nostdlib -mwindows -Wl,-e,_TickMain@0 $(OSVER) -Wl,--disable-dynamic
 LIBS := -lkernel32 -luser32 -lgdi32 -lcomdlg32
 DLLFLAGS := -shared -nostdlib -Wl,-e,_DllMain@12 -Wl,--kill-at $(OSVER) -s
 
-SRC := src/tick.c src/capture.c src/session.c src/clock.c src/launch.c src/png.c src/diff.c src/ring.c src/rt.c
+SRC := src/tick.c src/capture.c src/session.c src/plat_win.c src/clock.c src/launch.c src/png.c src/diff.c src/ring.c src/rt.c
 OBJ := $(SRC:src/%.c=$(B)/%.o) $(B)/tick.res.o $(B)/hook.res.o
 SOBJ := $(SRC:src/%.c=$(B)/screen/%.o) $(B)/screen/tick.res.o
 CFLAGS64 := -O2 -ffreestanding -fno-builtin -fno-stack-protector -mno-stack-arg-probe \
@@ -97,4 +97,28 @@ $(B)/tickctl.exe: tests/tickctl.c | $(B)
 $(B)/fakevendor.exe: tests/fakevendor.c | $(B)
 	$(CC) -O2 -o $@ $<
 
-.PHONY: all check test clean tools-test
+# ---------------- Linux: build/linux/tick (static, x86-64) ----------------
+LCC ?= gcc
+LCFLAGS := -O2 -Wall -Wextra -Wno-unused-parameter -D_FILE_OFFSET_BITS=64
+LSRC := src/posix/tick_linux.c src/posix/capture_x11.c src/posix/x11.c src/posix/listener_posix.c \
+        src/posix/plat_posix.c src/posix/clock_posix.c src/session.c src/png.c src/diff.c src/ring.c src/rt.c
+L := $(B)/linux
+
+linux: $(L)/tick
+
+$(L)/libtickhook.so: hook/tickhook_linux.c src/ring.c src/ring.h
+	mkdir -p $(L)
+	$(LCC) -shared -fPIC -O2 -fno-builtin -fno-stack-protector -fno-tree-loop-distribute-patterns -Wall -Wextra \
+	    -nostartfiles -Wl,--hash-style=both -Wl,-z,noexecstack -s -o $@ hook/tickhook_linux.c
+
+$(L)/hookso.c: $(L)/libtickhook.so tools/embed.py
+	python3 -I tools/embed.py $< tickhook_so > $@
+
+$(L)/tick: $(LSRC) src/*.h src/posix/*.h $(L)/hookso.c
+	$(LCC) $(LCFLAGS) -static -pthread -o $@ $(LSRC) $(L)/hookso.c
+	strip $@
+
+linux-check: $(L)/tick
+	sh tools/check-linux.sh $(L)/tick $(L)/libtickhook.so
+
+.PHONY: all check test clean tools-test linux linux-check

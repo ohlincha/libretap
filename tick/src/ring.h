@@ -40,10 +40,20 @@ enum {
     REC_IOCTL,          /* a = code, b = in length, c = out length; payload: in then out */
     REC_PURGE,          /* a = flags */
     REC_SETUP,          /* a = in queue, b = out queue */
-    REC_ERROR           /* payload: UTF-8 text */
+    REC_ERROR,          /* payload: UTF-8 text */
+    REC_TERMIOS,        /* Linux: a = ok, c = call (1 tcsetattr, 2 ioctl TCSETS*); payload: tick_termios */
+    REC_MODEM           /* Linux: a = op (1 set, 2 bits on, 3 bits off), b = TIOCM_* bits, c = ok */
 };
 
+/* Linux port settings as Tick records them (independent of libc's struct termios) */
+typedef struct {
+    u32 iflag, oflag, cflag, lflag;
+    u32 ispeed, ospeed;     /* baud */
+    u8 cc[20];
+} tick_termios;
+
 #define RECF_QPC 1      /* t is a QueryPerformanceCounter value, else a FILETIME */
+#define RECF_UNIXUS 2   /* t is Unix time in microseconds (Linux) */
 
 typedef struct {
     u32 hdr;

@@ -105,3 +105,12 @@ void clock_iso(sbuf *b, u64 us)
     sb_u32w(b, (u32)off / 60, 2); sb_putc(b, ':');
     sb_u32w(b, (u32)off % 60, 2);
 }
+
+void clock_tm(u64 us, tick_tm *t)
+{
+    SYSTEMTIME st;
+    clock_local(us, &st);
+    t->year = st.wYear; t->mon = st.wMonth; t->day = st.wDay;
+    t->hour = st.wHour; t->min = st.wMinute; t->sec = st.wSecond;
+    t->ms = st.wMilliseconds; t->wday = st.wDayOfWeek;
+}
