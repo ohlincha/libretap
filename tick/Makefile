@@ -146,4 +146,16 @@ linux-tools-test:
 	$(LCC) -O2 -o $(L)/fakevendor_linux tests/fakevendor_linux.c
 	$(LCC) -O2 -o $(L)/fakedevices_linux tests/fakedevices_linux.c
 
-.PHONY: all check test clean tools-test linux linux-check test-usb linux-tools-test
+# ---------------- DemoMeter / DemoInstrument: a pretend vendor program and instrument for trying Tick ----------------
+DEMOFLAGS := $(filter-out -DWINVER=0x0400 -D_WIN32_WINNT=0x0400,$(CFLAGS)) -DWINVER=0x0400 -D_WIN32_WINNT=0x0400
+demo: $(B)/demo/DemoMeter.exe $(B)/demo/DemoInstrument.exe
+$(B)/demo/DemoMeter.exe: demo/meter.c demo/rt_demo.c demo/demo_common.h
+	mkdir -p $(B)/demo
+	$(CC) $(DEMOFLAGS) -nostdlib -mwindows -Wl,-e,_MeterMain@0 $(OSVER) -Wl,--disable-dynamicbase -s -o $@ demo/meter.c demo/rt_demo.c -lkernel32 -luser32 -lgdi32 -lws2_32
+$(B)/demo/DemoInstrument.exe: demo/instrument.c demo/rt_demo.c demo/demo_common.h
+	mkdir -p $(B)/demo
+	$(CC) $(DEMOFLAGS) -nostdlib -mconsole -Wl,-e,_InstrumentMain@0 $(OSVER) -Wl,--disable-dynamicbase -s -o $@ demo/instrument.c demo/rt_demo.c -lkernel32 -luser32 -lws2_32
+demo-check: demo
+	sh tools/check-demo-imports.sh $(OBJDUMP) $(B)/demo/DemoMeter.exe $(B)/demo/DemoInstrument.exe
+
+.PHONY: demo demo-check all check test clean tools-test linux linux-check test-usb linux-tools-test
