@@ -146,7 +146,8 @@ bool Project::addSession(const QString& sessionFolder, QString* error, int* inde
     QString where = abs;
     if (!folder.isEmpty()) {
         const QString rel = QDir(folder).relativeFilePath(abs);
-        if (rel.startsWith(QLatin1String(".."))) {   // outside: copy it in, so the project is one folder
+        // outside (or on another drive, where Windows has no relative path): copy it in, so the project is one folder
+        if (rel.startsWith(QLatin1String("..")) || QDir::isAbsolutePath(rel)) {
             QString target = QDir(folder).filePath(QFileInfo(abs).fileName());
             for (int k = 2; QFileInfo::exists(target); ++k) target = QDir(folder).filePath(QFileInfo(abs).fileName() + QStringLiteral("-%1").arg(k));
             if (!copyFolder(abs, target, error)) return false;

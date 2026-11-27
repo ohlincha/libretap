@@ -568,7 +568,9 @@ std::unique_ptr<Camera> Camera::open(const QString& id, QString* error) {
     if (!c->openDevice(id, error)) return nullptr;
     return c;
 #else
-    if (error) *error = QStringLiteral("no camera %1").arg(id);
+    if (error)
+        *error = systemCamerasAllowed() ? QStringLiteral("no camera %1").arg(id)
+                                        : QStringLiteral("real cameras are switched off (LIBRETAP_NO_SYSTEM_CAMERAS)");
     return nullptr;
 #endif
 }
