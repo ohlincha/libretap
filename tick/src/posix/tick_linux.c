@@ -249,8 +249,8 @@ static void draw(void)
             PUT("  %s\033[K\n", nl ? fit(nl + 1, line, sizeof line, 2) : "");
         } else PUT("  Ports too? Start the program with: tick run PROGRAM (recommended)\033[K\n\033[K\n");
     }
-    if (note_mode) PUT("\n  Note for mark (Enter = mark, Esc = cancel): %s_\033[K\n", note);
-    else PUT("\n  [s] %s   [m] mark with note   [y] sync   [q] quit\033[K\n", rec ? "stop" : "start");
+    if (note_mode) PUT("\033[K\n  Note for mark (Enter = mark, Esc = cancel): %s_\033[K\n", note);
+    else PUT("\033[K\n  [s] %s   [m] mark with note   [y] sync   [q] quit\033[K\n", rec ? "stop" : "start");
     PUT("\033[J");
 #undef PUT
     if (write(1, out, o) < 0) {}
