@@ -370,8 +370,10 @@ void stethoscope(QPainter& p, QPointF c, double s, const QColor& rubber) {
 bool darkScheme() {
     if (qEnvironmentVariable("LIBRETAP_THEME") == QLatin1String("dark")) return true;
     if (qEnvironmentVariable("LIBRETAP_THEME") == QLatin1String("light")) return false;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     if (const auto* h = QGuiApplication::styleHints(); h && h->colorScheme() != Qt::ColorScheme::Unknown)
         return h->colorScheme() == Qt::ColorScheme::Dark;
+#endif
     return QGuiApplication::palette().color(QPalette::Window).lightness() < 128;
 }
 

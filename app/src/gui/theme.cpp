@@ -14,8 +14,10 @@ bool g_dark = false;
 bool g_connected = false;
 
 bool systemDark() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     const Qt::ColorScheme cs = QGuiApplication::styleHints()->colorScheme();
     if (cs != Qt::ColorScheme::Unknown) return cs == Qt::ColorScheme::Dark;
+#endif
     return QGuiApplication::palette().color(QPalette::Window).lightness() < 128;
 }
 
@@ -196,9 +198,11 @@ void apply(QApplication& app, Mode m) {
     applyNow(app);
     if (!g_connected) {
         g_connected = true;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
         QObject::connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, &app, [&app] {
             if (g_mode == Mode::Auto) applyNow(app);
         });
+#endif
     }
 }
 

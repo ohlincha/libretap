@@ -83,6 +83,16 @@ jobs:
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
+      - name: Failed tests, run directly (output and exit code)
+        if: failure()
+        env: { QT_QPA_PLATFORM: offscreen, LIBRETAP_NO_SYSTEM_CAMERAS: "1" }
+        run: |
+          foreach ($t in Get-Content build\Testing\Temporary\LastTestsFailed.log) {
+            $n = ($t -split ':')[1]
+            Write-Host "===== $n"
+            & "build\$n.exe" -o "-,txt" -v1 2>&1 | Out-Host
+            Write-Host "exit code $LASTEXITCODE"
+          }
       - run: cmake --install build --prefix dist/LibreTap
       - name: Deploy Qt and ffmpeg
         run: |
