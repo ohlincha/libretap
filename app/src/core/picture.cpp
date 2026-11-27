@@ -80,11 +80,11 @@ Readability readability(const QImage& image, const QRectF& region) {
     // verdict, worst problem first
     if (r.high < 70) r.verdict = QStringLiteral("Too dark");
     else if (r.clipped > 0.35 || (r.low > 170 && r.clipped > 0.05)) r.verdict = QStringLiteral("Too bright (text burnt out)");
-    else if (r.contrast < 60) r.verdict = QStringLiteral("Low contrast");
-    else if (r.sharpness < 22) r.verdict = QStringLiteral("Too blurred");
+    else if (r.contrast < 35) r.verdict = QStringLiteral("Low contrast");   // a real C920 photo of an LCD: 54-58, readable
+    else if (r.sharpness < 12) r.verdict = QStringLiteral("Too blurred");   // real C920 photos of an LCD, readable: 13-38; synthetic blur 2.5 px: 10.7
     else r.verdict = QStringLiteral("Text readable");
-    const double sContrast = std::clamp((r.contrast - 40) / 120.0, 0.0, 1.0);
-    const double sSharp = std::clamp((r.sharpness - 10) / 30.0, 0.0, 1.0);
+    const double sContrast = std::clamp((r.contrast - 20) / 100.0, 0.0, 1.0);
+    const double sSharp = std::clamp((r.sharpness - 5) / 25.0, 0.0, 1.0);
     const double sClip = std::clamp(1.0 - r.clipped / 0.35, 0.0, 1.0);
     const double sLight = std::clamp((r.high - 40) / 120.0, 0.0, 1.0);
     r.score = int(std::lround(100 * sContrast * sSharp * sClip * sLight));
@@ -194,6 +194,35 @@ OptimiseResult optimisePicture(const PictureIO& io, const QRectF& region, double
             if (ne != e) io.set(QStringLiteral("exposure"), ne);
             if (ng != gain) io.set(QStringLiteral("gain"), ng);
             e = ne, gain = ng;
+        }
+        // Screens refresh 60 times a second: an exposure that is not a whole number of refresh periods (16.7 ms)
+        // catches part of a refresh and shows dark bands. Above 10 ms, snap to whole periods and level the
+        // brightness with gain (seen on a real C920: 21.3 ms gave bands across an LCD).
+        if (e >= 100 && exposure->max >= 167) {
+            const double period = 1000.0 / 6.0;   // 16.67 ms in V4L2's 0.1 ms units
+            int k = std::max(1, int(std::lround(e / period)));
+            while (k > 1 && k * period > exposure->max) --k;
+            const int snapped = std::clamp(int(std::lround(k * period)), exposure->min, exposure->max);
+            if (snapped != e) { io.set(QStringLiteral("exposure"), snapped); e = snapped; }
+            for (int step = 0; gainC && step < 8 && !timeUp(); ++step) {
+                const Readability r = readability(settled(3), region);
+                if (!r.valid) break;
+                int ng = gain;
+                const int g8 = std::max(1, (gainC->max - gainC->min) / 16);
+                if (r.clipped > 0.02 || r.high >= 250) ng = std::max(gainC->min, gain - g8);
+                else if (r.high < 205) ng = std::min(gainC->max, gain + g8);
+                else break;
+                if (ng == gain) {   // gain at its limit: one refresh period more or less
+                    const int ke = r.high < 205 ? k + 1 : k - 1;
+                    if (ke < 1 || ke * period > exposure->max) break;
+                    k = ke;
+                    e = int(std::lround(k * period));
+                    io.set(QStringLiteral("exposure"), e);
+                    continue;
+                }
+                io.set(QStringLiteral("gain"), ng);
+                gain = ng;
+            }
         }
         done << QStringLiteral("exposure %1 → %2 ms (manual)").arg(e0 / 10.0, 0, 'f', 1).arg(e / 10.0, 0, 'f', 1);
         if (gainC && gain != gainC->value) done << QStringLiteral("gain %1 → %2").arg(gainC->value).arg(gain);

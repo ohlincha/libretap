@@ -70,7 +70,8 @@ private slots:
         QTest::newRow("very blurred") << 0.92 << 5.0 << 1.0 << "Too blurred";
         QTest::newRow("burnt out") << 3.0 << 0.0 << 1.0 << "Too bright (text burnt out)";
         QTest::newRow("dark") << 0.18 << 0.0 << 1.0 << "Too dark";
-        QTest::newRow("flat") << 0.9 << 0.0 << 0.25 << "Low contrast";
+        QTest::newRow("faint (contrast 55, as a real C920 photo of an LCD)") << 0.9 << 0.0 << 0.25 << "Text readable";
+        QTest::newRow("flat") << 0.9 << 0.0 << 0.12 << "Low contrast";
     }
     void verdicts() {
         QFETCH(double, light);
