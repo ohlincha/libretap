@@ -64,6 +64,17 @@ void p_os(sbuf *b)
     memset(&ov, 0, sizeof ov);
     ov.dwOSVersionInfoSize = sizeof ov;
     if (!GetVersionExA(&ov)) return;
+    if (ov.dwPlatformId == VER_PLATFORM_WIN32_NT) {
+        /* Windows 8.1 and later report 6.2 to programs without a compatibility manifest: ask ntdll for the real
+         * version (RtlGetVersion: Windows 2000 and later, loaded by name; absent on 9x/NT 4, then keep 6.2-style) */
+        typedef LONG (WINAPI *RGV)(OSVERSIONINFOW *);
+        HMODULE nt = GetModuleHandleA("ntdll.dll");
+        RGV rgv = nt ? (RGV)(void *)GetProcAddress(nt, "RtlGetVersion") : 0;
+        OSVERSIONINFOW w;
+        memset(&w, 0, sizeof w);
+        w.dwOSVersionInfoSize = sizeof w;
+        if (rgv && rgv(&w) == 0) { ov.dwMajorVersion = w.dwMajorVersion; ov.dwMinorVersion = w.dwMinorVersion; ov.dwBuildNumber = w.dwBuildNumber; }
+    }
     sb_u32(b, ov.dwMajorVersion); sb_putc(b, '.'); sb_u32(b, ov.dwMinorVersion);
     sb_str(b, " build ");
     sb_u32(b, ov.dwPlatformId == VER_PLATFORM_WIN32_NT ? ov.dwBuildNumber : (ov.dwBuildNumber & 0xffff));
