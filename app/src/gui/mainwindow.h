@@ -40,7 +40,8 @@ public:
     ~MainWindow() override;
 
     void setDemo(bool on);                 // the pretend instrument and camera (no hardware)
-    bool startRecording();
+    bool startRecording(bool interactive = false);
+    bool setupCapture();   // pkexec setup-capture; true when capture works afterwards
     void stopRecording();
     bool openRecording(const QString& path);
     bool addSession(const QString& folder);   // "Add Tick session…" without the dialog

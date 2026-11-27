@@ -22,6 +22,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProgressDialog>
+#include <QProcess>
 #include <QPushButton>
 #include <QSettings>
 #include <QShortcut>
@@ -38,6 +39,7 @@
 #include <cmath>
 
 #include "core/control.h"
+#include "core/ethernet.h"
 #include "core/match.h"
 #include "core/tickbundle.h"
 #include "core/util.h"
@@ -370,6 +372,8 @@ QWidget* MainWindow::buildRecordPage() {
     ethDot_ = dot();
     ethText_ = new QLabel;
     ethText_->setWordWrap(true);
+    ethText_->setTextFormat(Qt::RichText);
+    connect(ethText_, &QLabel::linkActivated, this, [this] { setupCapture(); });
     auto* ethRow = new QHBoxLayout;
     ethRow->setSpacing(8);
     useEth_ = new QCheckBox(QStringLiteral("Record the network on"));
@@ -402,7 +406,7 @@ QWidget* MainWindow::buildRecordPage() {
     record_->setMinimumHeight(58);
     connect(record_, &QPushButton::clicked, this, [this] {
         if (rec_.isRecording()) stopRecording();
-        else startRecording();
+        else startRecording(true);
     });
     side->addWidget(record_);
     recStatus_ = new QLabel;
@@ -654,7 +658,8 @@ void MainWindow::refreshConnections() {
         if (on) {
             const CaptureAccess acc = captureAccess();
             ethText_->setText(acc.ok ? QStringLiteral("The switch must copy (mirror) the instrument's and the PC's ports to this computer's port.")
-                                     : acc.sentence);
+                                     : acc.sentence.toHtmlEscaped() +
+                                           (captureSetupCommand().isEmpty() ? QString() : QStringLiteral(" <a href=\"setup\">Set it up now…</a>")));
             setDot(ethDot_, acc.ok ? "ok" : "warn");
         } else {
             setDot(ethDot_, "off");
@@ -761,8 +766,56 @@ void MainWindow::updateRecordUi() {
     }
 }
 
-bool MainWindow::startRecording() {
+bool MainWindow::setupCapture() {
+    const QStringList cmd = captureSetupCommand();
+    if (cmd.isEmpty()) return false;
+    QProgressDialog pd(QStringLiteral("Setting up network capture: installing Wireshark if needed and allowing you to capture.\n"
+                                      "Your password is asked for in a separate window."),
+                       QString(), 0, 0, this);
+    pd.setWindowTitle(QStringLiteral("Network capture"));
+    pd.setMinimumDuration(0);
+    pd.setValue(0);
+    QProcess p;
+    p.setProcessChannelMode(QProcess::MergedChannels);
+    p.start(cmd.first(), cmd.mid(1));
+    while (!p.waitForFinished(100)) {
+        QCoreApplication::processEvents();
+        if (p.state() == QProcess::NotRunning) break;
+    }
+    pd.close();
+    refreshConnections();
+    const CaptureAccess acc = captureAccess();
+    if (p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0 && acc.ok) {
+        QMessageBox::information(this, QStringLiteral("Network capture"), QStringLiteral("Network capture is set up. You can record the network now."));
+        return true;
+    }
+    const QString out = QString::fromLocal8Bit(p.readAll()).trimmed().right(600);
+    QMessageBox::warning(this, QStringLiteral("Network capture"),
+                         QStringLiteral("<p>Network capture is not set up%1.</p><p>%2</p>%3")
+                             .arg(p.exitCode() == 126 || p.exitCode() == 127 ? QStringLiteral(" (the password window was closed)") : QString(),
+                                  acc.sentence.toHtmlEscaped(),
+                                  out.isEmpty() ? QString() : QStringLiteral("<pre>%1</pre>").arg(out.toHtmlEscaped())));
+    return false;
+}
+
+bool MainWindow::startRecording(bool interactive) {
     if (rec_.isRecording()) return true;
+    // the operator pressed Record with the network ticked but capture not possible: ask, rather than fail
+    if (interactive && !demo_ && useEth_->isChecked() && !captureAccess().ok) {
+        QMessageBox box(QMessageBox::Warning, QStringLiteral("Network capture is not set up"), captureAccess().sentence, QMessageBox::NoButton, this);
+        QPushButton* setup = captureSetupCommand().isEmpty() ? nullptr : box.addButton(QStringLiteral("Set it up now"), QMessageBox::AcceptRole);
+        QPushButton* without = box.addButton(QStringLiteral("Record without the network"), QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        if (setup) box.setDefaultButton(setup);
+        box.exec();
+        if (setup && box.clickedButton() == setup) {
+            if (!setupCapture()) return false;
+        } else if (box.clickedButton() == without) {
+            useEth_->setChecked(false);
+        } else {
+            return false;
+        }
+    }
     RecordOptions o;
     o.demo = demo_;
     o.tapConfig = tapConfig();
@@ -780,6 +833,7 @@ bool MainWindow::startRecording() {
     QString err;
     if (!rec_.start(o, &err)) {
         recStatus_->setText(QStringLiteral("<b>Could not start:</b> %1").arg(err.toHtmlEscaped()));
+        if (interactive) QMessageBox::warning(this, QStringLiteral("Could not start recording"), err);   // stays until read
         return false;
     }
     live_->setT0(wallNow());

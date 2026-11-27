@@ -83,8 +83,9 @@ private slots:
         QVERIFY(rec.waitForStarted());
         // the first line says it started
         QTRY_VERIFY_WITH_TIMEOUT(rec.canReadLine(), 20000);
-        const QJsonObject first = QJsonDocument::fromJson(rec.readLine()).object();
-        QVERIFY(first.value(QStringLiteral("started")).toBool());
+        const QByteArray line = rec.readLine();
+        const QJsonObject first = QJsonDocument::fromJson(line).object();
+        QVERIFY2(first.value(QStringLiteral("started")).toBool(), line.constData());
         const QString project = first.value(QStringLiteral("project")).toString();
         QVERIFY(project.endsWith(QStringLiteral("-cli_test")));
         QTest::qWait(1200);

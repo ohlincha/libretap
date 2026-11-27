@@ -1,0 +1,41 @@
+#!/bin/sh
+# LibreTap: set up network capture for a user (run as root: by the .deb's postinst, or by LibreTap through pkexec
+# when the user clicks "Set it up"). Installs Wireshark if dumpcap is missing, then does what answering "Yes" to
+# Wireshark's "Should non-superusers be able to capture packets?" does, and puts the user in the wireshark group.
+#   setup-capture [USER]      (USER: default $SUDO_USER, or the pkexec caller)
+# Undo: sudo dpkg-reconfigure wireshark-common (answer No) and sudo gpasswd -d USER wireshark.
+set -e
+user="${1:-${SUDO_USER:-}}"
+if [ -z "$user" ] && [ -n "${PKEXEC_UID:-}" ]; then
+    user=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
+fi
+
+if [ ! -e /usr/bin/dumpcap ] && command -v apt-get >/dev/null 2>&1; then
+    echo "wireshark-common wireshark-common/install-setuid boolean true" | debconf-set-selections 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y wireshark
+fi
+[ -e /usr/bin/dumpcap ] || { echo "dumpcap is still missing: install Wireshark (sudo apt install wireshark)" >&2; exit 1; }
+
+# 1. Wireshark's own way, remembered for its upgrades
+if command -v debconf-set-selections >/dev/null 2>&1; then
+    echo "wireshark-common wireshark-common/install-setuid boolean true" | debconf-set-selections || true
+fi
+if command -v dpkg-reconfigure >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -f noninteractive wireshark-common >/dev/null 2>&1 || true
+fi
+# 2. the same by hand if that could not run (dpkg-reconfigure refuses while dpkg is busy, e.g. inside a postinst)
+getent group wireshark >/dev/null 2>&1 || addgroup --quiet --system wireshark || true
+if command -v dpkg-statoverride >/dev/null 2>&1 && ! dpkg-statoverride --list /usr/bin/dumpcap >/dev/null 2>&1; then
+    dpkg-statoverride --update --add root wireshark 0754 /usr/bin/dumpcap || true
+fi
+if command -v setcap >/dev/null 2>&1; then
+    setcap cap_net_raw,cap_net_admin=eip /usr/bin/dumpcap || chmod u+s /usr/bin/dumpcap || true
+else
+    chmod u+s /usr/bin/dumpcap || true
+fi
+# 3. the user into the group (LibreTap uses `sg wireshark` until the next login, so no logout is needed)
+if [ -n "$user" ] && [ "$user" != "root" ] && getent passwd "$user" >/dev/null 2>&1; then
+    usermod -aG wireshark "$user"
+    echo "network capture set up for $user"
+fi
+exit 0

@@ -91,10 +91,25 @@ QString dumpcapProgram() {
     if (!env.isEmpty()) return QFileInfo(env).isExecutable() ? env : QString();
     QString p = QStandardPaths::findExecutable(QStringLiteral("dumpcap"));
     if (!p.isEmpty()) return p;
+    // Present but not executable for this session is normal on Linux: dumpcap belongs to the wireshark group, and
+    // a user just added to it gets the group only at the next login (captureAccess() then runs it through sg).
     for (const QString& c : {QStringLiteral("/usr/bin/dumpcap"), QStringLiteral("/usr/sbin/dumpcap"),
                              QStringLiteral("C:/Program Files/Wireshark/dumpcap.exe"),
                              QStringLiteral("/Applications/Wireshark.app/Contents/MacOS/dumpcap")})
-        if (QFileInfo(c).isExecutable()) return c;
+        if (QFileInfo(c).isFile()) return c;
+    return {};
+}
+
+QStringList captureSetupCommand() {
+#if defined(Q_OS_LINUX)
+    const QString pk = QStandardPaths::findExecutable(QStringLiteral("pkexec"));
+    if (pk.isEmpty()) return {};
+    QStringList scripts{qEnvironmentVariable("LIBRETAP_SETUP_CAPTURE")};
+    if (QCoreApplication::instance()) scripts << QCoreApplication::applicationDirPath() + QStringLiteral("/../libexec/libretap/setup-capture");
+    scripts << QStringLiteral("/usr/libexec/libretap/setup-capture");
+    for (const QString& sc : scripts)
+        if (!sc.isEmpty() && QFileInfo(sc).isExecutable()) return {pk, QFileInfo(sc).canonicalFilePath()};
+#endif
     return {};
 }
 
@@ -107,7 +122,7 @@ CaptureAccess captureAccess() {
 #elif defined(Q_OS_MACOS)
         a.sentence = QStringLiteral("Ethernet capture needs Wireshark: install it from wireshark.org, including its \"ChmodBPF\" part, then start LibreTap again.");
 #else
-        a.sentence = QStringLiteral("Ethernet capture needs Wireshark's dumpcap: sudo apt install wireshark-common");
+        a.sentence = QStringLiteral("Ethernet capture needs Wireshark: sudo apt install wireshark");
 #endif
         return a;
     }
@@ -124,7 +139,7 @@ CaptureAccess captureAccess() {
     }
     const QFileInfo fi(a.program);
     const bool forGroup = fi.group() == QLatin1String("wireshark");
-    const bool forAll = fi.permission(QFileDevice::ExeOther) && fi.group() != QLatin1String("wireshark");
+    const bool forAll = fi.permission(QFileDevice::ExeOther);   // dumpcap for everyone (capabilities or none)
     group* g = getgrnam("wireshark");
     bool member = false, active = false;
     if (g) {

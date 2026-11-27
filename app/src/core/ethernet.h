@@ -41,6 +41,9 @@ struct CaptureAccess {
 };
 CaptureAccess captureAccess();
 QString dumpcapProgram();          // $LIBRETAP_DUMPCAP, PATH, Wireshark's usual places; empty if none
+// Linux package: LibreTap can set capture up itself (installs Wireshark if missing, the wireshark group) through
+// pkexec, which asks for the administrator password. Empty when that is not possible here.
+QStringList captureSetupCommand();
 
 struct EthernetConfig {
     QString iface;
