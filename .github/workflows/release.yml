@@ -90,8 +90,9 @@ jobs:
           foreach ($t in Get-Content build\Testing\Temporary\LastTestsFailed.log) {
             $n = ($t -split ':')[1]
             Write-Host "===== $n"
-            & "build\$n.exe" -o "-,txt" -v1 2>&1 | Out-Host
+            & "build\$n.exe" -o "$n.txt,txt" 2>&1 | Out-Host
             Write-Host "exit code $LASTEXITCODE"
+            if (Test-Path "$n.txt") { Get-Content "$n.txt" | Out-Host }
           }
       - run: cmake --install build --prefix dist/LibreTap
       - name: Deploy Qt and ffmpeg

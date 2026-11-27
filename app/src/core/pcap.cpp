@@ -2,6 +2,7 @@
 
 #include <QFile>
 #include <QHostAddress>
+#include <QtEndian>
 
 #include <cmath>
 

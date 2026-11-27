@@ -1,0 +1,6 @@
+# Recorded sessions and captures are data: byte-exact on every platform (no CRLF conversion on Windows checkouts)
+*.jsonl -text
+*.pcap -text
+*.pcapng -text
+app/tests/data/** -text
+app/examples/** -text
