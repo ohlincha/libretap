@@ -113,6 +113,7 @@ private:
     QLabel *tlTitle_ = nullptr, *tlInfo_ = nullptr, *tlTime_ = nullptr;
     QComboBox* pictureBox_ = nullptr;
     PictureView* picture_ = nullptr;
+    PictureView* pictureAfter_ = nullptr;   // before/after a selected message
     TimelineBar* bar_ = nullptr;
     RowModel* rows_ = nullptr;
     QTableView* rowView_ = nullptr;

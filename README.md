@@ -29,6 +29,8 @@ instrument.
   `tick-…-linux-x86_64.tar.gz`), for those who only need Tick.
 - **USBPcap import**: a Wireshark/USBPcap capture made on the instrument PC, only the chosen devices (keyboards
   and USB sticks stay out).
+- **Before and after**: select a message and the screen is shown just before it and just after it, side by side,
+  with what changed outlined: a setting changed on the screen before a command, a reading appears after an answer.
 - **Marks**: press Mark (space bar) and say what you are about to change; marks appear on the timeline.
 - **Agents**: everything works from the command line, also against the running window:
   `LibreTapCLI status | start | mark "note" | sync | stop | ports | sessions | show | match | import`, all with

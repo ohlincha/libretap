@@ -171,4 +171,75 @@ QImage ScreenBuilder::at(const Project& p, const Picture& pic, double t, double*
     return image_;
 }
 
+std::vector<QRect> changedRegions(const QImage& a0, const QImage& b0) {
+    if (a0.isNull() || b0.isNull()) return {};
+    if (a0.size() != b0.size()) return {QRect(QPoint(0, 0), b0.size())};
+    const QImage a = a0.convertToFormat(QImage::Format_RGB32), b = b0.convertToFormat(QImage::Format_RGB32);
+    const int cell = 16, W = (a.width() + cell - 1) / cell, H = (a.height() + cell - 1) / cell;
+    std::vector<char> hit(size_t(W) * H, 0);
+    for (int y = 0; y < a.height(); ++y) {
+        const QRgb* pa = reinterpret_cast<const QRgb*>(a.constScanLine(y));
+        const QRgb* pb = reinterpret_cast<const QRgb*>(b.constScanLine(y));
+        for (int x = 0; x < a.width(); ++x) {
+            const QRgb u = pa[x], v = pb[x];
+            if (u == v) continue;
+            const int d = std::max({std::abs(qRed(u) - qRed(v)), std::abs(qGreen(u) - qGreen(v)), std::abs(qBlue(u) - qBlue(v))});
+            if (d > 48) ++hit[size_t(y / cell) * W + x / cell];   // counts saturate harmlessly below
+            if (hit[size_t(y / cell) * W + x / cell] > 100) hit[size_t(y / cell) * W + x / cell] = 100;
+        }
+    }
+    // cells with a few strongly changed pixels; neighbouring cells joined into one rectangle
+    std::vector<char> on(hit.size());
+    for (size_t i = 0; i < hit.size(); ++i) on[i] = hit[i] >= 4;
+    std::vector<QRect> out;
+    std::vector<int> stack;
+    for (int i = 0; i < W * H; ++i) {
+        if (!on[size_t(i)]) continue;
+        int x0 = W, y0 = H, x1 = -1, y1 = -1;
+        stack.push_back(i);
+        on[size_t(i)] = 0;
+        while (!stack.empty()) {
+            const int k = stack.back();
+            stack.pop_back();
+            const int cx = k % W, cy = k / W;
+            x0 = std::min(x0, cx), y0 = std::min(y0, cy), x1 = std::max(x1, cx), y1 = std::max(y1, cy);
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const int nx = cx + dx, ny = cy + dy;
+                    if (nx < 0 || ny < 0 || nx >= W || ny >= H || !on[size_t(ny * W + nx)]) continue;
+                    on[size_t(ny * W + nx)] = 0;
+                    stack.push_back(ny * W + nx);
+                }
+        }
+        out.push_back(QRect(x0 * cell, y0 * cell, (x1 - x0 + 1) * cell, (y1 - y0 + 1) * cell).intersected(a.rect()));
+    }
+    return out;
+}
+
+BeforeAfter beforeAfter(const Project& p, const Picture& pic, double t, double window) {
+    BeforeAfter r;
+    ScreenBuilder sb;
+    r.before = sb.at(p, pic, t, &r.beforeT);
+    for (const TItem& f : pic.frames) {
+        if (f.t <= t) continue;
+        if (f.t - t > window) break;
+        double ft = 0;
+        const QImage img = sb.at(p, pic, f.t, &ft);   // steps forward from the cache
+        if (img.isNull()) continue;
+        if (r.before.isNull()) {                        // nothing before: the first picture is the "after"
+            r.after = img.copy();
+            r.afterT = ft;
+            break;
+        }
+        std::vector<QRect> ch = changedRegions(r.before, img);
+        if (ch.empty()) continue;                       // a picture that changed nothing visible (noise)
+        r.after = img.copy();
+        r.afterT = ft;
+        r.changed = std::move(ch);
+        break;
+    }
+    if (!r.before.isNull()) r.before = r.before.copy();   // detach from the builder
+    return r;
+}
+
 }  // namespace lt

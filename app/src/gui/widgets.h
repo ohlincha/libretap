@@ -55,14 +55,19 @@ public:
     void setImage(const QImage& img) { img_ = img; update(); }
     void setPlaceholder(const QString& t) { placeholder_ = t; update(); }
     void setCaption(const QString& t) { caption_ = t; update(); }
+    void setHeading(const QString& t) { heading_ = t; update(); }                 // above the picture ("Before")
+    void setHighlights(std::vector<QRect> r) { highlights_ = std::move(r); update(); }   // picture coordinates
     const QImage& image() const { return img_; }
+    const QString& caption() const { return caption_; }
+    const std::vector<QRect>& highlights() const { return highlights_; }
 
 protected:
     void paintEvent(QPaintEvent*) override;
 
 private:
     QImage img_;
-    QString placeholder_, caption_;
+    QString placeholder_, caption_, heading_;
+    std::vector<QRect> highlights_;
 };
 
 // The scrub bar: traffic as ticks (PC's above the line, the instrument's below), pictures as dots, marks as

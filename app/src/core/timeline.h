@@ -2,6 +2,7 @@
 // A project's sessions on one clock: the rows to list (traffic, marks, syncs, notes), the pictures (camera stills,
 // Tick screens) and how to describe each row in plain words. Used by the GUI's timeline and `LibreTapCLI show`.
 #include <QImage>
+#include <QRect>
 #include <QString>
 
 #include <vector>
@@ -56,5 +57,19 @@ private:
     int cacheIndex_ = -1;          // frames painted up to this index
     QImage image_;
 };
+
+// Where two pictures of the same screen differ: rectangles in picture coordinates, small differences (camera noise,
+// JPEG) ignored. Different sizes: the whole picture.
+std::vector<QRect> changedRegions(const QImage& a, const QImage& b);
+
+// Cause and effect around a moment (a message): the screen as it was at t, and the first picture after t that
+// differs from it (within `window` seconds), with the changed areas. A command usually follows a change on the
+// screen (before); an answer usually shows on the screen after it arrived (after).
+struct BeforeAfter {
+    QImage before, after;
+    double beforeT = -1e300, afterT = -1e300;   // project times of the pictures (after: -1e300 when none)
+    std::vector<QRect> changed;
+};
+BeforeAfter beforeAfter(const Project& p, const Picture& pic, double t, double window = 5.0);
 
 }  // namespace lt

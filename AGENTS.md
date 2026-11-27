@@ -46,6 +46,10 @@ LibreTapCLI hints REC [--family TEXT]        text/binary, line end, header, leng
                                              numbers/bytes that vary and their values at each mark
 LibreTapCLI grep REC TEXT | hex:AA BB
 LibreTapCLI screen REC --mark N --out f.png  the screen when that mark was set (look at it!)
+LibreTapCLI screen REC --at T --out before.png --after after.png
+                                             cause and effect around a message (T: its time from `show`): the
+                                             screen before it, and the first changed picture after it with the
+                                             changes outlined (an answer shows up after; a setting changed before)
 LibreTapCLI keyframes REC --out DIR          screen pictures at marks and where a command changed
 LibreTapCLI export REC --ai DIR              index.md + traffic, exchanges, hints, diffs between marks, key frames
 LibreTapCLI decode REC --protocol FILE [--unexplained]   sentences, and the % of bytes explained

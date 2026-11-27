@@ -129,6 +129,15 @@ void PictureView::paintEvent(QPaintEvent*) {
     p.setBrush(theme::pictureBackground());
     p.drawRoundedRect(r, 12, 12);
     const int capH = caption_.isEmpty() ? 0 : fontMetrics().height() + 8;
+    const int headH = heading_.isEmpty() ? 0 : fontMetrics().height() + 8;
+    if (headH) {
+        QFont f = font();
+        f.setBold(true);
+        p.setFont(f);
+        p.setPen(palette().color(QPalette::WindowText));
+        p.drawText(r.adjusted(12, 6, -12, 0), Qt::AlignTop | Qt::AlignLeft, heading_);
+        p.setFont(font());
+    }
     if (img_.isNull()) {
         p.setPen(palette().color(QPalette::PlaceholderText));
         QFont f = font();
@@ -136,11 +145,18 @@ void PictureView::paintEvent(QPaintEvent*) {
         p.setFont(f);
         p.drawText(r.adjusted(24, 24, -24, -24), Qt::AlignCenter | Qt::TextWordWrap, placeholder_);
     } else {
-        const QRectF area = r.adjusted(10, 10, -10, -10 - capH);
+        const QRectF area = r.adjusted(10, 10 + headH, -10, -10 - capH);
         QSizeF s = img_.size();
         s.scale(area.size(), Qt::KeepAspectRatio);
         const QRectF target(area.center().x() - s.width() / 2, area.center().y() - s.height() / 2, s.width(), s.height());
         p.drawImage(target, img_);
+        if (!highlights_.empty()) {   // what changed: amber outlines
+            const double k = target.width() / img_.width();
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(QColor(0xe0, 0x9a, 0x2a), 2.5));
+            for (const QRect& h : highlights_)
+                p.drawRoundedRect(QRectF(target.x() + h.x() * k, target.y() + h.y() * k, h.width() * k, h.height() * k).adjusted(-3, -3, 3, 3), 4, 4);
+        }
     }
     if (capH) {
         p.setPen(theme::dim());

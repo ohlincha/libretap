@@ -518,8 +518,13 @@ QWidget* MainWindow::buildTimelinePage() {
         showPicture();
     });
     picture_ = new PictureView;
+    pictureAfter_ = new PictureView;
+    pictureAfter_->hide();
     pl->addWidget(pictureBox_, 0, Qt::AlignLeft);
-    pl->addWidget(picture_, 1);
+    auto* pics = new QHBoxLayout;
+    pics->addWidget(picture_, 1);
+    pics->addWidget(pictureAfter_, 1);
+    pl->addLayout(pics, 1);
     split->addWidget(picBox);
 
     auto* lower = new QWidget;
@@ -1019,16 +1024,48 @@ void MainWindow::showPicture() {
     const double t = bar_->time();
     tlTime_->setText(QStringLiteral("%1 / %2").arg(clockText(t - tl_.start), clockText(tl_.end - tl_.start, false)));
     const int k = pictureBox_->currentIndex();
+    picture_->setHeading({});
+    picture_->setHighlights({});
     if (k < 0 || k >= int(tl_.pictures.size())) {
         picture_->setImage({});
         picture_->setCaption({});
+        pictureAfter_->hide();
         return;
     }
+    const Picture& pic = tl_.pictures[size_t(k)];
+    // A message selected (not just a moment on the bar): cause and effect, the screen before it and the first
+    // changed picture after it, with what changed outlined.
+    const QModelIndex cur = rowView_->currentIndex();
+    const bool message = cur.isValid() && size_t(cur.row()) < tl_.rows.size() && std::abs(tl_.rows[size_t(cur.row())].t - t) < 1e-9 &&
+                         tl_.event(project_, tl_.rows[size_t(cur.row())]).kind == QLatin1String("data");
+    if (message) {
+        const BeforeAfter ba = beforeAfter(project_, pic, t);
+        picture_->setHeading(QStringLiteral("Before"));
+        picture_->setImage(ba.before);
+        picture_->setCaption(ba.before.isNull() ? QString()
+                                                : QStringLiteral("%1 · %2 (%3 s before this message)")
+                                                      .arg(pic.label, clockText(ba.beforeT - tl_.start))
+                                                      .arg(t - ba.beforeT, 0, 'f', 1));
+        pictureAfter_->setHeading(QStringLiteral("After"));
+        pictureAfter_->setImage(ba.after);
+        pictureAfter_->setHighlights(ba.changed);
+        pictureAfter_->setPlaceholder(QStringLiteral("The screen did not change\nin the 5 s after this message."));
+        pictureAfter_->setCaption(ba.after.isNull() ? QString()
+                                                    : QStringLiteral("%1 (%2 s after) · %3 changed")
+                                                          .arg(clockText(ba.afterT - tl_.start))
+                                                          .arg(ba.afterT - t, 0, 'f', 1)
+                                                          .arg(ba.changed.empty() ? QStringLiteral("first picture")
+                                                               : ba.changed.size() == 1 ? QStringLiteral("1 area")
+                                                                                        : QStringLiteral("%1 areas").arg(ba.changed.size())));
+        pictureAfter_->show();
+        return;
+    }
+    pictureAfter_->hide();
     double ft = 0;
-    picture_->setImage(screen_.at(project_, tl_.pictures[size_t(k)], t, &ft));
+    picture_->setImage(screen_.at(project_, pic, t, &ft));
     picture_->setCaption(picture_->image().isNull() ? QString()
                                                     : QStringLiteral("%1 · picture from %2 (%3 s before)")
-                                                          .arg(tl_.pictures[size_t(k)].label, clockText(ft - tl_.start))
+                                                          .arg(pic.label, clockText(ft - tl_.start))
                                                           .arg(t - ft, 0, 'f', 1));
 }
 

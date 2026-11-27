@@ -76,6 +76,17 @@ private slots:
         for (auto* t : w.findChildren<QTableView*>())
             if (t->isVisible()) rows = t;
         QVERIFY(rows && rows->model()->rowCount() > 8);
+        // a message selected: the screen before it and after it side by side, changes outlined
+        {
+            int found = 0;
+            for (int r = rows->model()->rowCount() - 1; r >= 0 && !found; --r) {
+                rows->setCurrentIndex(rows->model()->index(r, 0));
+                for (auto* v : w.findChildren<gui::PictureView*>())
+                    if (v->isVisible() && v->caption().contains(QStringLiteral("s after")) && !v->highlights().empty()) found = r;
+            }
+            QVERIFY2(found > 0, "no message showed a changed picture after it");
+            if (!qEnvironmentVariableIsEmpty("LIBRETAP_TEST_SHOT")) w.grab().save(qEnvironmentVariable("LIBRETAP_TEST_SHOT"));
+        }
         // start again from the socket ("start" uses the window's connections)
         QVERIFY(ask({{QStringLiteral("cmd"), QStringLiteral("start")}}, &ans, &err));
         QVERIFY2(ans.value(QStringLiteral("ok")).toBool(), qPrintable(ans.value(QStringLiteral("error")).toString()));

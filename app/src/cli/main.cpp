@@ -3,6 +3,8 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QDir>
+#include <algorithm>
+#include <QPainter>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -70,6 +72,8 @@ Analysis (REC: folder, name or "latest"; a moment is --mark N or --at SECONDS fr
   LibreTapCLI grep REC TEXT | hex:AA BB      messages containing it
   LibreTapCLI stats REC                      links, messages, bytes, kinds of message, marks, pictures
   LibreTapCLI screen REC --at T|--mark N --out FILE.png   the screen (camera or Tick) at that moment
+               [--after FILE.png]            also the first changed picture after it, changes outlined (cause and
+                                             effect around a message: --at its time from `show`)
   LibreTapCLI keyframes REC [--out DIR]      moments where the screen changed near a mark or a changed command
   LibreTapCLI export REC --ai DIR            index.md + traffic, exchanges, hints, diffs between marks, key frames
   LibreTapCLI decode REC --protocol FILE [--unexplained]  each message in a sentence, and how much is explained
@@ -587,7 +591,7 @@ int cmdStats(const QStringList& a) {
 }
 
 int cmdScreen(const QStringList& a) {
-    Args args(a, {QStringLiteral("at"), QStringLiteral("mark"), QStringLiteral("out"), QStringLiteral("picture")});
+    Args args(a, {QStringLiteral("at"), QStringLiteral("mark"), QStringLiteral("out"), QStringLiteral("picture"), QStringLiteral("after")});
     Rec r;
     QString err;
     if (!openRec(args.pos.value(0), &r, &err)) return fail(err);
@@ -605,9 +609,38 @@ int cmdScreen(const QStringList& a) {
     const QImage img = screenAt(r.p, r.tl, t, args.opt.value(QStringLiteral("picture"), QStringLiteral("0")).toInt(), &ft);
     if (img.isNull()) return fail(r.tl.pictures.empty() ? QStringLiteral("this recording has no pictures") : QStringLiteral("no picture yet at that time"));
     if (!img.save(file)) return fail(QStringLiteral("cannot write %1").arg(file));
-    if (gJson) outJson({{QStringLiteral("ok"), true}, {QStringLiteral("file"), QFileInfo(file).absoluteFilePath()}, {QStringLiteral("t"), t},
-                        {QStringLiteral("picture_t"), ft}, {QStringLiteral("picture_age_s"), t - ft}, {QStringLiteral("width"), img.width()}, {QStringLiteral("height"), img.height()}});
-    else out(QStringLiteral("%1: picture from %2 (%3 s before), %4×%5").arg(QFileInfo(file).absoluteFilePath(), clockText(ft - r.tl.start)).arg(t - ft, 0, 'f', 1).arg(img.width()).arg(img.height()));
+    QJsonObject res{{QStringLiteral("ok"), true}, {QStringLiteral("file"), QFileInfo(file).absoluteFilePath()}, {QStringLiteral("t"), t},
+                    {QStringLiteral("picture_t"), ft}, {QStringLiteral("picture_age_s"), t - ft}, {QStringLiteral("width"), img.width()}, {QStringLiteral("height"), img.height()}};
+    if (!gJson) out(QStringLiteral("%1: picture from %2 (%3 s before), %4×%5").arg(QFileInfo(file).absoluteFilePath(), clockText(ft - r.tl.start)).arg(t - ft, 0, 'f', 1).arg(img.width()).arg(img.height()));
+    if (args.opt.contains(QStringLiteral("after"))) {
+        const int k = args.opt.value(QStringLiteral("picture"), QStringLiteral("0")).toInt();
+        const BeforeAfter ba = beforeAfter(r.p, r.tl.pictures[size_t(std::clamp(k, 0, int(r.tl.pictures.size()) - 1))], t);
+        const QString afile = args.opt.value(QStringLiteral("after"));
+        QJsonArray rects;
+        if (ba.after.isNull()) {
+            res.insert(QStringLiteral("after"), QJsonValue::Null);
+            if (!gJson) out(QStringLiteral("after: the screen did not change in the 5 s after that moment"));
+        } else {
+            QImage marked = ba.after.convertToFormat(QImage::Format_RGB32);
+            QPainter pt(&marked);
+            pt.setPen(QPen(QColor(0xe0, 0x9a, 0x2a), 3));
+            for (const QRect& c : ba.changed) {
+                pt.drawRect(c.adjusted(-3, -3, 3, 3));
+                rects.append(QJsonArray{c.x(), c.y(), c.width(), c.height()});
+            }
+            pt.end();
+            if (!marked.save(afile)) return fail(QStringLiteral("cannot write %1").arg(afile));
+            res.insert(QStringLiteral("after"), QJsonObject{{QStringLiteral("file"), QFileInfo(afile).absoluteFilePath()}, {QStringLiteral("picture_t"), ba.afterT},
+                                                            {QStringLiteral("delay_s"), ba.afterT - t}, {QStringLiteral("changed"), rects}});
+            if (!gJson) {
+                QStringList cs;
+                for (const QRect& c : ba.changed) cs << QStringLiteral("%1×%2 at %3,%4").arg(c.width()).arg(c.height()).arg(c.x()).arg(c.y());
+                out(QStringLiteral("%1: picture from %2 (%3 s after), changed: %4").arg(QFileInfo(afile).absoluteFilePath(), clockText(ba.afterT - r.tl.start))
+                        .arg(ba.afterT - t, 0, 'f', 1).arg(cs.isEmpty() ? QStringLiteral("(first picture)") : cs.join(QStringLiteral(", "))));
+            }
+        }
+    }
+    if (gJson) outJson(res);
     return 0;
 }
 

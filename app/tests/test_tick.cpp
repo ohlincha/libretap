@@ -80,6 +80,37 @@ private slots:
         QCOMPARE(sb.at(p, pic, pic.frames[1].t + 0.01), fresh2.at(p, pic, pic.frames[1].t + 0.01));
     }
 
+    void beforeAndAfter() {
+        Project p;
+        QVERIFY(Project::load(kFixture, &p, nullptr));
+        Timeline tl;
+        tl.build(p);
+        const Picture& pic = tl.pictures[0];
+        // just after the first picture: before = the first, after = the second (a region at 0,0 of 672×448)
+        const BeforeAfter ba = beforeAfter(p, pic, pic.frames[0].t + 0.01);
+        QVERIFY(!ba.before.isNull() && !ba.after.isNull());
+        QCOMPARE(ba.afterT, pic.frames[1].t);
+        QVERIFY(!ba.changed.empty());
+        for (const QRect& r : ba.changed) QVERIFY2(QRect(0, 0, 672, 448).contains(r), qPrintable(QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height())));
+        // after the last picture: nothing changes any more
+        const BeforeAfter end = beforeAfter(p, pic, pic.frames.back().t + 0.01);
+        QVERIFY(!end.before.isNull());
+        QVERIFY(end.after.isNull());
+        // the same picture: no change; noise below the threshold: no change; one changed block: found
+        QImage a(320, 200, QImage::Format_RGB32);
+        a.fill(Qt::white);
+        QVERIFY(changedRegions(a, a).empty());
+        QImage b = a;
+        for (int x = 0; x < 320; x += 7) b.setPixel(x, 50, qRgb(230, 230, 230));   // faint speckle
+        QVERIFY(changedRegions(a, b).empty());
+        for (int y = 100; y < 120; ++y)
+            for (int x = 200; x < 260; ++x) b.setPixel(x, y, qRgb(0, 0, 0));
+        const auto ch = changedRegions(a, b);
+        QCOMPARE(ch.size(), size_t(1));
+        QVERIFY(ch[0].contains(QRect(200, 100, 60, 20)));
+        QVERIFY(ch[0].width() <= 60 + 32 && ch[0].height() <= 20 + 32);
+    }
+
     void importAndMatch() {
         // a LibreTap tap session that saw the same bytes, its clock 3.25 s ahead of the old PC's
         Session tick;
