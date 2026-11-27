@@ -370,7 +370,42 @@ class V4l2Camera : public Camera {
 public:
     ~V4l2Camera() override {
         stop();
+        restoreControls();
         if (fd_ >= 0) ::close(fd_);
+    }
+    // A camera keeps its picture settings until unplugged, and another program may have left it dark (manual
+    // exposure, brightness 0). For photos of a screen LibreTap wants the camera's own defaults with automatic
+    // exposure; what it found is put back when it closes the camera, so other programs see no change.
+    void defaultControls() {
+        static const unsigned ids[] = {V4L2_CID_BRIGHTNESS, V4L2_CID_CONTRAST, V4L2_CID_SATURATION, V4L2_CID_GAIN,
+                                       V4L2_CID_GAMMA, V4L2_CID_EXPOSURE_AUTO, V4L2_CID_AUTO_WHITE_BALANCE,
+                                       V4L2_CID_BACKLIGHT_COMPENSATION};
+        for (unsigned id : ids) {
+            v4l2_queryctrl q{};
+            q.id = id;
+            if (xioctl(fd_, VIDIOC_QUERYCTRL, &q) < 0 || (q.flags & V4L2_CTRL_FLAG_DISABLED)) continue;
+            v4l2_control c{};
+            c.id = id;
+            if (xioctl(fd_, VIDIOC_G_CTRL, &c) < 0) continue;
+            if (c.value == q.default_value) continue;
+            saved_.push_back({id, c.value});
+            c.value = q.default_value;
+            xioctl(fd_, VIDIOC_S_CTRL, &c);
+        }
+    }
+    void restoreControls() {
+        if (fd_ < 0) return;
+        // exposure mode first, so a saved manual exposure time is accepted again
+        std::stable_sort(saved_.begin(), saved_.end(), [](const auto& a, const auto& b) {
+            return (a.first == V4L2_CID_EXPOSURE_AUTO) > (b.first == V4L2_CID_EXPOSURE_AUTO);
+        });
+        for (const auto& [id, value] : saved_) {
+            v4l2_control c{};
+            c.id = id;
+            c.value = value;
+            xioctl(fd_, VIDIOC_S_CTRL, &c);
+        }
+        saved_.clear();
     }
     bool openDevice(const QString& dev, QString* error) {
         dev_ = dev;
@@ -423,6 +458,7 @@ public:
     CameraMode mode() const override { return mode_; }
     bool start(const CameraMode& m, QString* error) override {
         stop();
+        if (saved_.empty()) defaultControls();
         v4l2_format f{};
         f.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         f.fmt.pix.width = m.w, f.fmt.pix.height = m.h;
@@ -510,6 +546,7 @@ private:
     int fd_ = -1;
     bool streaming_ = false;
     std::vector<std::pair<void*, std::size_t>> bufs_;
+    std::vector<std::pair<unsigned, int>> saved_;   // controls changed to their defaults, with the values found
     CameraMode mode_;
 };
 #endif
