@@ -14,11 +14,11 @@
  * call straight through. */
 #include "tick.h"
 #ifdef TICK_SCREEN_ONLY
-/* TickScreen.exe: screen recording only, no listener inside at all */
+/* TickEyes.exe: screen recording only, no listener inside at all */
 int launch_program(const char *exe, const char *args, char *err, u32 errcap)
-{ (void)exe; (void)args; copy_str(err, "TickScreen records the screen only.", errcap); return 0; }
+{ (void)exe; (void)args; copy_str(err, "TickEyes records the screen only.", errcap); return 0; }
 int attach_process(DWORD pid, const char *name, char *err, u32 errcap)
-{ (void)pid; (void)name; copy_str(err, "TickScreen records the screen only.", errcap); return 0; }
+{ (void)pid; (void)name; copy_str(err, "TickEyes records the screen only.", errcap); return 0; }
 int listener_running(void) { return 0; }
 DWORD listener_pid(void) { return 0; }
 const char *listener_program(void) { return ""; }

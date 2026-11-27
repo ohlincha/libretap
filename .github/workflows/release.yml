@@ -245,7 +245,7 @@ jobs:
         run: |
           v=$(sed -n 's/.*TICK_VERSION *"\([^"]*\)".*/\1/p' src/*.h | head -1)
           mkdir -p dist/Tick
-          cp build/Tick.exe build/TickScreen.exe README.md SAFETY.md dist/Tick/
+          cp build/Tick.exe build/TickEyes.exe README.md SAFETY.md dist/Tick/
           (cd dist && zip -qr "Tick-${v:-dev}-Windows.zip" Tick)
           cp build/linux/tick dist/tick && (cd dist && tar czf "tick-${v:-dev}-linux-x86_64.tar.gz" tick)
           ls -l dist

@@ -8,7 +8,7 @@ include(GNUInstallDirs)
 
 # Tick, the portable companion for the old PC, carried inside the installers so it can be copied to a USB stick
 # (File ▸ Copy Tick to a USB stick, `LibreTapCLI tick copy`). LIBRETAP_TICK_DIR: a folder with Tick's built files
-# (Tick.exe, TickScreen.exe, tick, README.md, SAFETY.md); CI fills it from the Tick job.
+# (Tick.exe, TickEyes.exe, tick, README.md, SAFETY.md); CI fills it from the Tick job.
 set(LIBRETAP_TICK_DIR "" CACHE PATH "Folder with Tick's built files to bundle (empty: none)")
 if(LIBRETAP_TICK_DIR)
   if(NOT EXISTS "${LIBRETAP_TICK_DIR}/Tick.exe")

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Wine tests of Tick 0.2 additions (run like wine-test.sh, normally with win7):
 #  1  64-bit vendor program: Tick /run fakevendor64.exe -> api-serial events via TickHook64.dll
-#  2  TickScreen.exe /start: screen-only build, recorder "TickScreen"
+#  2  TickEyes.exe /start: screen-only build, recorder "TickEyes"
 #  3  program-windows-only capture: Tick.ini program_windows_only=1, Tick /run notepad.exe
 #     (a 64-bit program under this Wine) -> pictures show notepad, the rest black; Tick's own
 #     window is not masked grey here, so it must come out black (checked below)
@@ -19,7 +19,7 @@ export WINEPREFIX=${WINEPREFIX:-$scratch/pfx} WINEDEBUG=${WINEDEBUG:--all} WINED
 base="$WINEPREFIX/drive_c"
 for d in t64 tscreen tprog; do rm -rf "$base/$d"; mkdir -p "$base/$d"; done
 cp "$here/build/Tick.exe" "$here/build/tickctl.exe" "$here/build/fakevendor64.exe" "$base/t64/"
-cp "$here/build/TickScreen.exe" "$here/build/tickctl.exe" "$base/tscreen/"
+cp "$here/build/TickEyes.exe" "$here/build/tickctl.exe" "$base/tscreen/"
 cp "$here/build/Tick.exe" "$here/build/tickctl.exe" "$base/tprog/"
 printf '[tick]\nprogram_windows_only=1\nhide_tick_window=0\n' > "$base/tprog/Tick.ini"
 out="$scratch/t64-$ver"; rm -rf "$out"; mkdir -p "$out"
@@ -34,9 +34,9 @@ cd "$base/t64"
 sleep 14
 "$WINE" tickctl.exe close
 sleep 3
-echo "== 2: TickScreen"
+echo "== 2: TickEyes"
 cd "$base/tscreen"
-"$WINE" TickScreen.exe /start &
+"$WINE" TickEyes.exe /start &
 sleep 6
 import -window root "$out/tickscreen.png"
 "$WINE" tickctl.exe mark "screen only"

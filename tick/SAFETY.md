@@ -9,7 +9,7 @@ pretend instrument; **Tick has not yet run on a real Windows PC or next to a rea
 ## Which way to use it
 
 - **Tick.exe is the normal choice.** If IT rules or the antivirus do not accept a program that loads a DLL into
-  another program, use **TickScreen.exe** instead: the same program without the listener (no DLL inside, no
+  another program, use **TickEyes.exe** instead: the same program without the listener (no DLL inside, no
   "Start a program...", no attaching). It only takes screenshots and notes marks and syncs, which is very low risk.
 - **To record the serial port, use "Start a program...".** Tick then starts the vendor program itself and records
   the port being opened and all its settings from the start. Nothing of Tick is ever placed inside a program that
@@ -33,7 +33,7 @@ pretend instrument; **Tick has not yet run on a real Windows PC or next to a rea
 - Windows itself may remember that Tick ran, as it does for every program (for example the list of recently opened
   files in the *Open* dialog).
 
-**To remove Tick:** delete `Tick.exe` (or `TickScreen.exe`), `Tick.ini` (if any) and the `TickSessions` folder.
+**To remove Tick:** delete `Tick.exe` (or `TickEyes.exe`), `Tick.ini` (if any) and the `TickSessions` folder.
 That is all.
 
 **What is in the pictures:** by default the whole screen (except Tick's own window, painted grey). If other things
@@ -83,7 +83,7 @@ file continues; screenshots resume above 50 MB free. *Not tested.*
 
 **Antivirus warnings.** To listen, Tick loads its DLL into another program; some antivirus products treat that as
 suspicious and may block or delete `Tick.exe`, even if you only want screen recording. Do not switch the antivirus
-off on a PC that is on a network. Ask whoever looks after the PC to allow `Tick.exe`, or use `TickScreen.exe`
+off on a PC that is on a network. Ask whoever looks after the PC to allow `Tick.exe`, or use `TickEyes.exe`
 (no DLL, no loading into other programs), or film the screen with LibreTap's camera. *Not tested* with any
 antivirus product.
 
@@ -139,7 +139,7 @@ program went on). Not tested on a real old Linux instrument PC.
 | Disk full | no (code path written, not exercised) |
 | Antivirus | no |
 | 64-bit test program started from Tick (Windows 7 mode) | yes, Wine (normal run; worst cases only with 32-bit) |
-| TickScreen.exe; "vendor program's windows only" pictures | yes, Wine |
+| TickEyes.exe; "vendor program's windows only" pictures | yes, Wine |
 | Listen to a running program (attach), Pick the program's window | no |
 | Real Windows 2000/XP/7/10/11, real vendor program, real instrument | **no** |
 | Windows 95/98 | no |

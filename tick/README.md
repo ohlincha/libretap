@@ -19,9 +19,9 @@ It is one small file, `Tick.exe` (about 115 kB), for Windows 2000, XP, Vista, 7,
 for 32- and 64-bit vendor programs); Windows 95/98/ME and NT 4 are best effort. Nothing to install. Read
 [SAFETY.md](SAFETY.md) before using it next to an instrument.
 
-**Which file?** Use `Tick.exe`. Use `TickScreen.exe` (about 50 kB) only if the PC's IT rules or antivirus do not
-accept Tick: it is the same program without the listener inside (no "Start a program...", no DLL at all), so it
-records the screen, marks and syncs only.
+**Which file?** Use `Tick.exe`. Use `TickEyes.exe` (about 50 kB, "eyes only") only if the PC's IT rules or
+antivirus do not accept Tick: it is the same program without the listener inside (no "Start a program...", no DLL
+at all), so it watches the screen and records marks and syncs, but does not listen to the ports.
 
 ## Use
 
@@ -147,19 +147,19 @@ anywhere (the Makefile finds `~/opt/llvm-mingw-*`; or `make CROSS=/path/to/bin/i
 and python3 for the native tests.
 
 ```
-make              # build/Tick.exe (TickHook.dll, TickHook64.dll, TickHelper64.exe inside) and build/TickScreen.exe
+make              # build/Tick.exe (TickHook.dll, TickHook64.dll, TickHelper64.exe inside) and build/TickEyes.exe
 make check        # import allow-list check (tools/check-imports.sh) + native unit tests
 make linux        # build/linux/tick (static) with libtickhook.so inside
 make tools-test   # test helpers for Wine runs: tickctl.exe, fakevendor.exe, fakevendor64.exe
 WINE=/path/to/wine tests/wine-test.sh win2k /tmp/tickwine     # end-to-end under Wine + Xvfb
 WINE=/path/to/wine tests/wine-safety.sh win2k /tmp/tickwine   # worst cases (kill Tick, kill program, ...)
-WINE=/path/to/wine tests/wine-test64.sh win7 /tmp/tickwine    # 64-bit program, TickScreen, program-only capture
+WINE=/path/to/wine tests/wine-test64.sh win7 /tmp/tickwine    # 64-bit program, TickEyes, program-only capture
 WINE=/path/to/wine tests/wine-test-netusb.sh win7 /tmp/tickwine  # network + device listener, 32 and 64 bit
 make test-usb     # USB decoding without hardware (native)
 ```
 
 Needs the x86_64 compiler of the same toolchain for the 64-bit parts. `tools/check-imports.sh` fails if Tick.exe,
-TickScreen.exe or TickHook.dll imports a function that is not in
+TickEyes.exe or TickHook.dll imports a function that is not in
 `tools/win95-imports.txt` (functions present in both Windows 95 and 2000) or if the PE version is above 4.0.
 
 ## Tested and untested
@@ -180,7 +180,7 @@ removed, quit while the program runs; `tests/linux-test.sh`); native unit tests 
 screen recording, Mark/Enter/Sync, Stop/Start, `/run` with a test program talking to a fake instrument on a
 pseudo-terminal mapped to COM1 (open, settings, timeouts, DTR, purge, writes, reads, overlapped reads, late-bound
 `WriteFile`, close, exit code), and the worst cases listed in SAFETY.md. Tick 0.2 (Windows 7 mode): a 64-bit test
-program listened to through TickHelper64/TickHook64; TickScreen.exe; program-windows-only capture with a 64-bit
+program listened to through TickHelper64/TickHook64; TickEyes.exe; program-windows-only capture with a 64-bit
 notepad (Tick's own window, deliberately not masked, came out black).
 
 **Not tested on real Windows or real hardware yet**: no run on an actual Windows 2000/XP/7/10/11 PC, none on

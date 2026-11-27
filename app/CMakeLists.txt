@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(LibreTap VERSION 0.1.0 LANGUAGES CXX)
+project(LibreTap VERSION 0.1.1 LANGUAGES CXX)
 
 # LibreTap: record what old vendor software says to its instrument (passive sniffers) together with the
 # instrument PC's screen, and look at both on one timeline. Session format: ../docs/FORMAT.md.

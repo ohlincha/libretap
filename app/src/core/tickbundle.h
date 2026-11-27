@@ -8,7 +8,7 @@
 
 namespace lt {
 
-// The folder holding the bundled Tick (Tick.exe, TickScreen.exe, tick for Linux, README.md, SAFETY.md), or empty
+// The folder holding the bundled Tick (Tick.exe, TickEyes.exe, tick for Linux, README.md, SAFETY.md), or empty
 // when this LibreTap was built without it. $LIBRETAP_TICK_DIR overrides.
 QString bundledTickDir();
 

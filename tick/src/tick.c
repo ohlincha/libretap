@@ -741,7 +741,7 @@ void __stdcall TickMain(void)
     }
     CreateWindowExA(g_cfg.topmost ? WS_EX_TOPMOST : 0, "TickRecorder",
 #ifdef TICK_SCREEN_ONLY
-                    "TickScreen - LibreTap screen recorder",
+                    "TickEyes - LibreTap screen recorder (eyes only)",
 #else
                     "Tick - LibreTap recorder",
 #endif

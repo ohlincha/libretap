@@ -34,7 +34,7 @@ SOBJ := $(SRC:src/%.c=$(B)/screen/%.o) $(B)/screen/tick.res.o
 CFLAGS64 := -O2 -ffreestanding -fno-builtin -fno-stack-protector -mno-stack-arg-probe \
           -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type
 
-all: $(B)/Tick.exe $(B)/TickScreen.exe
+all: $(B)/Tick.exe $(B)/TickEyes.exe
 
 $(B):
 	mkdir -p $(B)
@@ -42,7 +42,7 @@ $(B):
 $(B)/%.o: src/%.c src/*.h | $(B)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# TickScreen.exe: the same program without the listener (no DLL inside)
+# TickEyes.exe: the same program without the listener (no DLL inside)
 $(B)/screen/%.o: src/%.c src/*.h | $(B)
 	mkdir -p $(B)/screen
 	$(CC) $(CFLAGS) -DTICK_SCREEN_ONLY -c -o $@ $<
@@ -51,7 +51,7 @@ $(B)/screen/tick.res.o: $(B)/tick.res.o
 	mkdir -p $(B)/screen
 	cp $< $@
 
-$(B)/TickScreen.exe: $(SOBJ)
+$(B)/TickEyes.exe: $(SOBJ)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SOBJ) $(LIBS)
 
 # 64-bit parts, carried inside Tick.exe and used only for 64-bit programs
@@ -77,7 +77,7 @@ $(B)/Tick.exe: $(OBJ)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJ) $(LIBS)
 
 check: $(B)/Tick.exe test
-	OBJDUMP=$(OBJDUMP) sh tools/check-imports.sh $(B)/Tick.exe $(B)/TickScreen.exe $(B)/TickHook.dll
+	OBJDUMP=$(OBJDUMP) sh tools/check-imports.sh $(B)/Tick.exe $(B)/TickEyes.exe $(B)/TickHook.dll
 
 test: | $(B)
 	gcc -O2 -Wall -Wextra -o $(B)/test_core tests/test_core.c src/rt.c src/png.c src/diff.c src/ring.c -lpthread

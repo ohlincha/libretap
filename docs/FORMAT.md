@@ -182,7 +182,7 @@ file. Full frames also carry `x`, `y` (0) and `w`, `h`. Tick also stores a full 
 changed, and its own window is painted flat grey in the pictures (`"tick": {"tick_window_masked": true}` in
 session.json) because its clock changes ten times a second. PNG files are 8-bit RGB.
 
-Tick session details (Tick 0.2; `recorder` is `"Tick 0.2.0"`, or `"TickScreen 0.2.0"` for the screen-only build):
+Tick session details (Tick 0.2; `recorder` is `"Tick 0.2.0"`, or `"TickEyes 0.4.1"` for the screen-only build, called TickScreen before 0.4.1):
 - session.json is rewritten when a source appears during recording (an `api-serial` source when the program first
   opens a COM port) and at the end (`ended`). It also has `utc_offset_min` (the PC's offset from UTC at the start)
   and `tick` (its screenshot options). `tick.capture` is `"screen"` (whole screen, the default) or
