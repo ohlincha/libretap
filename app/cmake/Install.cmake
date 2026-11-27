@@ -89,11 +89,13 @@ else()
   set(CPACK_DEBIAN_PACKAGE_SECTION science)
   set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
   set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-  # ffmpeg: cameras; wireshark-common: dumpcap for Ethernet capture (the postinst lets the installing user capture,
-  # see packaging/linux/postinst and the README); libcap2-bin: setcap
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "ffmpeg, wireshark-common, libcap2-bin")
+  # Everything LibreTap uses is a hard dependency, so one install gives a working setup (the Qt libraries come from
+  # SHLIBDEPS): ffmpeg: cameras; wireshark: dumpcap for Ethernet capture and the program to look at captures (the
+  # postinst lets the installing user capture, see packaging/linux/postinst and the README); libcap2-bin: setcap;
+  # qt6-qpa-plugins / qt6-wayland: the window on X11 / Wayland (only recommended by Qt's own packages).
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "ffmpeg, wireshark, libcap2-bin, qt6-qpa-plugins, qt6-wayland")
   set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA ${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/postinst)
   set(CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION ON)
-  set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qt6-wayland, v4l-utils")
+  set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "v4l-utils")   # v4l2-ctl: for looking at cameras by hand
   include(CPack)
 endif()

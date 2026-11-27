@@ -51,7 +51,8 @@ macOS builds and the installers' permission steps are set up in CI but not yet r
 
 Capturing network traffic needs permission, so the installers set it up (this changes system settings):
 
-- **Linux (.deb)**: depends on `wireshark-common` (dumpcap) and `ffmpeg`. Its post-install script does what
+- **Linux (.deb)**: installs everything it uses with it: Wireshark (the program and its dumpcap), `ffmpeg`, and
+  Qt's X11 and Wayland window plugins. Its post-install script does what
   answering "Yes" to Wireshark's "allow non-superusers to capture packets?" does: a `wireshark` group, dumpcap
   runnable by that group with the network-capture capabilities (`cap_net_raw,cap_net_admin`), and the user who ran
   the installation (via sudo or pkexec) added to the group. Until that user logs in again, LibreTap starts dumpcap
