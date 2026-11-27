@@ -378,8 +378,8 @@ public:
     // exposure; what it found is put back when it closes the camera, so other programs see no change.
     void defaultControls() {
         static const unsigned ids[] = {V4L2_CID_BRIGHTNESS, V4L2_CID_CONTRAST, V4L2_CID_SATURATION, V4L2_CID_GAIN,
-                                       V4L2_CID_GAMMA, V4L2_CID_EXPOSURE_AUTO, V4L2_CID_AUTO_WHITE_BALANCE,
-                                       V4L2_CID_BACKLIGHT_COMPENSATION};
+                                       V4L2_CID_GAMMA, V4L2_CID_SHARPNESS, V4L2_CID_EXPOSURE_AUTO, V4L2_CID_AUTO_WHITE_BALANCE,
+                                       V4L2_CID_BACKLIGHT_COMPENSATION, V4L2_CID_ZOOM_ABSOLUTE};
         for (unsigned id : ids) {
             v4l2_queryctrl q{};
             q.id = id;
@@ -390,6 +390,14 @@ public:
             if (c.value == q.default_value) continue;
             saved_.push_back({id, c.value});
             c.value = q.default_value;
+            xioctl(fd_, VIDIOC_S_CTRL, &c);
+        }
+        // text on a screen must be in focus: continuous autofocus where the camera has it
+        v4l2_control c{};
+        c.id = V4L2_CID_FOCUS_AUTO;
+        if (xioctl(fd_, VIDIOC_G_CTRL, &c) == 0 && c.value == 0) {
+            saved_.push_back({V4L2_CID_FOCUS_AUTO, 0});
+            c.value = 1;
             xioctl(fd_, VIDIOC_S_CTRL, &c);
         }
     }
