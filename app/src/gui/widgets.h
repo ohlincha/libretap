@@ -60,14 +60,30 @@ public:
     const QImage& image() const { return img_; }
     const QString& caption() const { return caption_; }
     const std::vector<QRect>& highlights() const { return highlights_; }
+    // the screen region (fractions of the picture; empty: none), drawn as a dashed outline
+    void setRegion(const QRectF& r) { region_ = r; update(); }
+    const QRectF& region() const { return region_; }
+    // drawing mode: drag a box on the picture; regionDrawn() gives it as fractions of the picture
+    void setDrawing(bool on) { drawing_ = on; setCursor(on ? Qt::CrossCursor : Qt::ArrowCursor); update(); }
+    bool drawing() const { return drawing_; }
+
+signals:
+    void regionDrawn(const QRectF& box);
 
 protected:
     void paintEvent(QPaintEvent*) override;
+    void mousePressEvent(QMouseEvent* e) override;
+    void mouseMoveEvent(QMouseEvent* e) override;
+    void mouseReleaseEvent(QMouseEvent* e) override;
 
 private:
+    QPointF toPicture(const QPointF& p) const;   // widget → fractions of the picture
     QImage img_;
     QString placeholder_, caption_, heading_;
     std::vector<QRect> highlights_;
+    QRectF region_, target_, drag_;
+    bool drawing_ = false, dragging_ = false;
+    QPointF dragStart_;
 };
 
 // The scrub bar: traffic as ticks (PC's above the line, the instrument's below), pictures as dots, marks as

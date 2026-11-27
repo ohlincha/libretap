@@ -49,6 +49,7 @@ public:
     void showTimelinePage();
     void setTimelineTime(double t);
     Recorder& recorder() { return rec_; }
+    CameraFeed& camera() { return feed_; }
     bool loadProtocol(const QString& path);     // a protocol description: the Meaning column and coverage
     void openCompare(int a = 0, int b = 1);     // marks by index; the last entry is the end
     void showExchanges();
@@ -66,6 +67,8 @@ private:
     void refreshConnections();
     void updateRecordUi();
     void openCamera(const QString& id);
+    void pictureDialog();
+    void updateReadability();
     void doMark();
     void advancedDialog();
     void clocksDialog();
@@ -90,6 +93,10 @@ private:
     QStackedWidget* pages_ = nullptr;
     // record page
     PictureView* preview_ = nullptr;
+    QWidget* pictureRow_ = nullptr;          // readability line and picture buttons under the preview
+    QLabel *readDot_ = nullptr, *readText_ = nullptr;
+    QPushButton *optimiseBtn_ = nullptr, *pictureBtn_ = nullptr;
+    QDialog* pictureDlg_ = nullptr;
     QLabel *tapDot_ = nullptr, *tapText_ = nullptr, *camDot_ = nullptr, *camText_ = nullptr, *speedText_ = nullptr;
     QPushButton *swap_ = nullptr, *speed_ = nullptr, *advanced_ = nullptr, *demoButton_ = nullptr;
     QCheckBox* useCamera_ = nullptr;

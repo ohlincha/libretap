@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QPainter>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QThread>
@@ -79,6 +80,128 @@ public:
     void stop() override {}
 
 private:
+    CameraMode mode_;
+    QElapsedTimer clock_;
+    int n_ = 0;
+};
+
+// A simulated webcam with V4L2-like picture controls, filming an instrument PC's screen (white, with lines of
+// "text": dark strokes) in a dim room. Its automatic exposure averages the whole picture, so the screen comes out
+// burnt, as a real webcam's does; manual exposure time and gain scale the light, brightness and contrast shift and
+// stretch, and the focus position blurs the picture away from 120 (autofocus: always sharp). For tests of
+// readability and Optimise picture; "sim:manualfocus" has no autofocus. Draws without fonts (QPainter rectangles).
+class SimCamera : public Camera {
+public:
+    explicit SimCamera(bool autofocus) : af_(autofocus) {
+        auto add = [&](const char* n, const char* l, CameraControl::Kind k, int mn, int mx, int st, int def) {
+            CameraControl c;
+            c.name = QString::fromLatin1(n), c.label = QString::fromLatin1(l), c.kind = k;
+            c.min = mn, c.max = mx, c.step = st, c.def = def, c.value = def;
+            if (k == CameraControl::Menu) c.menu = {QStringLiteral("Manual Mode"), QString(), QStringLiteral("Aperture Priority Mode")};   // values 1..3
+            ctl_.push_back(c);
+        };
+        add("exposure_auto", "Exposure", CameraControl::Menu, 1, 3, 1, 3);
+        add("exposure", "Exposure time (0.1 ms)", CameraControl::Int, 3, 2047, 1, 250);
+        add("gain", "Gain", CameraControl::Int, 0, 255, 1, 0);
+        add("brightness", "Brightness", CameraControl::Int, 0, 255, 1, 128);
+        add("contrast", "Contrast", CameraControl::Int, 0, 255, 1, 128);
+        add("sharpness", "Sharpness", CameraControl::Int, 0, 255, 1, 128);
+        if (af_) add("focus_auto", "Autofocus", CameraControl::Bool, 0, 1, 1, 1);
+        add("focus", "Focus", CameraControl::Int, 0, 250, 5, af_ ? 0 : 30);
+        // a pseudo-random but fixed page of text strokes
+        quint32 r = 12345;
+        auto rnd = [&] { r = r * 1103515245u + 12345u; return (r >> 8) & 0xffff; };
+        for (int line = 0; line < 14; ++line)
+            for (int x = 0; x < 760;) {
+                const int w = 3 + int(rnd() % 3), gap = 2 + int(rnd() % 4);
+                const int h = rnd() % 5 == 0 ? 14 : 10;
+                if (rnd() % 9 == 0) { x += 14; continue; }   // a space between words
+                strokes_.push_back(QRect(260 + x, 170 + line * 34 + (14 - h), w, h));
+                x += w + gap;
+            }
+    }
+    QString name() const override { return af_ ? QStringLiteral("Simulated camera") : QStringLiteral("Simulated camera (manual focus)"); }
+    QString key() const override { return name(); }
+    std::vector<CameraMode> modes() const override { return {{1280, 720, 15}}; }
+    CameraMode mode() const override { return mode_; }
+    bool start(const CameraMode& m, QString*) override {
+        mode_ = m.w > 0 ? m : modes().front();
+        clock_.start();
+        n_ = 0;
+        return true;
+    }
+    std::vector<CameraControl> controls() const override {
+        std::vector<CameraControl> out = ctl_;
+        for (CameraControl& c : out) {
+            if (c.name == QLatin1String("exposure")) c.inactive = value("exposure_auto") != 1;
+            if (c.name == QLatin1String("focus")) c.inactive = af_ && value("focus_auto") == 1;
+        }
+        return out;
+    }
+    bool setControl(const QString& name, int v, QString* error) override {
+        for (CameraControl& c : ctl_)
+            if (c.name == name) {
+                if (c.kind == CameraControl::Menu && v != 1 && v != 3) {
+                    if (error) *error = QStringLiteral("%1: not accepted by the camera").arg(name);
+                    return false;
+                }
+                c.value = std::clamp(v, c.min, c.max);
+                return true;
+            }
+        if (error) *error = QStringLiteral("no setting '%1' on this camera").arg(name);
+        return false;
+    }
+    void resetControls() override {
+        for (CameraControl& c : ctl_) c.value = c.def;
+    }
+    bool grab(CameraFrame* out, QString*) override {
+        const double due = n_ / mode_.fps, now = clock_.nsecsElapsed() * 1e-9;
+        if (due > now) QThread::usleep(static_cast<unsigned long>((due - now) * 1e6));
+        QBuffer buf(&out->jpeg);
+        buf.open(QIODevice::WriteOnly);
+        out->jpeg.clear();
+        render().save(&buf, "JPG", 90);
+        out->t = due;
+        out->sequence = n_++;
+        return !out->jpeg.isEmpty();
+    }
+    void stop() override {}
+
+private:
+    int value(const char* n) const {
+        for (const CameraControl& c : ctl_)
+            if (c.name == QLatin1String(n)) return c.value;
+        return 0;
+    }
+    QImage render() const {
+        // light levels (1.0 = the screen's white) → grey via exposure, gain, contrast, brightness
+        double k;
+        if (value("exposure_auto") == 1) k = value("exposure") / 250.0 * (1 + value("gain") / 32.0) * 0.55;
+        else k = 2.6;   // automatic: the dim room pulls the exposure up and the screen burns out
+        const double contrast = value("contrast") / 128.0, bright = (value("brightness") - 128) * 0.8;
+        auto grey = [&](double light) { return std::clamp(int(std::lround((255 * light * k - 128) * contrast + 128 + bright)), 0, 255); };
+        QImage img(mode_.w, mode_.h, QImage::Format_RGB32);
+        img.fill(QColor(grey(0.06), grey(0.06), grey(0.07)));
+        QPainter p(&img);
+        const QRect screen(220, 120, 840, 520);
+        p.fillRect(screen.adjusted(-14, -14, 14, 14), QColor(grey(0.02), grey(0.02), grey(0.02)));   // bezel
+        p.fillRect(screen, QColor(grey(1.0), grey(1.0), grey(0.98)));
+        const int ink = grey(0.04);
+        for (const QRect& s : strokes_) p.fillRect(s, QColor(ink, ink, ink));
+        p.end();
+        // focus: blur grows with the distance from 120 (autofocus: sharp)
+        const bool sharp = af_ && value("focus_auto") == 1;
+        const double blur = sharp ? 0 : std::abs(value("focus") - 120) / 25.0;
+        if (blur > 0.6) {
+            const int w = std::max(16, int(img.width() / (1 + blur))), h = std::max(9, int(img.height() / (1 + blur)));
+            img = img.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                      .scaled(mode_.w, mode_.h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        }
+        return img;
+    }
+    bool af_;
+    std::vector<CameraControl> ctl_;
+    std::vector<QRect> strokes_;
     CameraMode mode_;
     QElapsedTimer clock_;
     int n_ = 0;
@@ -374,47 +497,109 @@ public:
         if (fd_ >= 0) ::close(fd_);
     }
     // A camera keeps its picture settings until unplugged, and another program may have left it dark (manual
-    // exposure, brightness 0). For photos of a screen LibreTap wants the camera's own defaults with automatic
-    // exposure; what it found is put back when it closes the camera, so other programs see no change.
+    // exposure, brightness 0, sharpness 0). For photos of a screen LibreTap starts from the camera's own defaults
+    // with automatic exposure and autofocus; every control it changes (here, by the user, by Optimise) is put back
+    // to the value it found when the camera is closed, so other programs see no change. The mains frequency is left
+    // as set (50 Hz in Europe avoids flicker; the default may be 60 Hz).
+    struct Ctl { const char* name; unsigned id; const char* label; };
+    static const std::vector<Ctl>& table() {
+        static const std::vector<Ctl> t = {
+            {"exposure_auto", V4L2_CID_EXPOSURE_AUTO, "Exposure"},
+            {"exposure", V4L2_CID_EXPOSURE_ABSOLUTE, "Exposure time (0.1 ms)"},
+            {"gain", V4L2_CID_GAIN, "Gain"},
+            {"brightness", V4L2_CID_BRIGHTNESS, "Brightness"},
+            {"contrast", V4L2_CID_CONTRAST, "Contrast"},
+            {"saturation", V4L2_CID_SATURATION, "Saturation"},
+            {"sharpness", V4L2_CID_SHARPNESS, "Sharpness"},
+            {"focus_auto", V4L2_CID_FOCUS_AUTO, "Autofocus"},
+            {"focus", V4L2_CID_FOCUS_ABSOLUTE, "Focus"},
+            {"white_balance_auto", V4L2_CID_AUTO_WHITE_BALANCE, "Automatic white balance"},
+            {"backlight", V4L2_CID_BACKLIGHT_COMPENSATION, "Backlight compensation"},
+            {"power_line", V4L2_CID_POWER_LINE_FREQUENCY, "Mains frequency (flicker)"},
+        };
+        return t;
+    }
+    // reset on open: everything above except focus position, exposure time and mains frequency (those follow the
+    // automatic modes or stay as set)
     void defaultControls() {
-        static const unsigned ids[] = {V4L2_CID_BRIGHTNESS, V4L2_CID_CONTRAST, V4L2_CID_SATURATION, V4L2_CID_GAIN,
-                                       V4L2_CID_GAMMA, V4L2_CID_SHARPNESS, V4L2_CID_EXPOSURE_AUTO, V4L2_CID_AUTO_WHITE_BALANCE,
-                                       V4L2_CID_BACKLIGHT_COMPENSATION, V4L2_CID_ZOOM_ABSOLUTE};
-        for (unsigned id : ids) {
+        for (const Ctl& c : table()) {
+            const QString n = QString::fromLatin1(c.name);
+            if (n == QLatin1String("power_line") || n == QLatin1String("focus") || n == QLatin1String("exposure")) continue;
             v4l2_queryctrl q{};
-            q.id = id;
+            q.id = c.id;
             if (xioctl(fd_, VIDIOC_QUERYCTRL, &q) < 0 || (q.flags & V4L2_CTRL_FLAG_DISABLED)) continue;
-            v4l2_control c{};
-            c.id = id;
-            if (xioctl(fd_, VIDIOC_G_CTRL, &c) < 0) continue;
-            if (c.value == q.default_value) continue;
-            saved_.push_back({id, c.value});
-            c.value = q.default_value;
-            xioctl(fd_, VIDIOC_S_CTRL, &c);
+            int v = q.default_value;
+            if (n == QLatin1String("focus_auto")) v = 1;   // text on a screen must be in focus
+            set(c.id, v);
         }
-        // text on a screen must be in focus: continuous autofocus where the camera has it
+        set(V4L2_CID_ZOOM_ABSOLUTE, -1);   // zoom: the camera's default
+    }
+    // value -1 for V4L2_CID_ZOOM_ABSOLUTE: its default (not in the table; only reset)
+    bool set(unsigned id, int value) {
+        v4l2_queryctrl q{};
+        q.id = id;
+        if (xioctl(fd_, VIDIOC_QUERYCTRL, &q) < 0 || (q.flags & V4L2_CTRL_FLAG_DISABLED)) return false;
+        if (value == -1 && id == V4L2_CID_ZOOM_ABSOLUTE) value = q.default_value;
         v4l2_control c{};
-        c.id = V4L2_CID_FOCUS_AUTO;
-        if (xioctl(fd_, VIDIOC_G_CTRL, &c) == 0 && c.value == 0) {
-            saved_.push_back({V4L2_CID_FOCUS_AUTO, 0});
-            c.value = 1;
-            xioctl(fd_, VIDIOC_S_CTRL, &c);
-        }
+        c.id = id;
+        if (xioctl(fd_, VIDIOC_G_CTRL, &c) < 0) return false;
+        if (!original_.count(id)) original_[id] = c.value;
+        if (c.value == value) return true;
+        c.value = std::clamp(value, int(q.minimum), int(q.maximum));
+        return xioctl(fd_, VIDIOC_S_CTRL, &c) == 0;
     }
     void restoreControls() {
         if (fd_ < 0) return;
-        // exposure mode first, so a saved manual exposure time is accepted again
-        std::stable_sort(saved_.begin(), saved_.end(), [](const auto& a, const auto& b) {
-            return (a.first == V4L2_CID_EXPOSURE_AUTO) > (b.first == V4L2_CID_EXPOSURE_AUTO);
-        });
-        for (const auto& [id, value] : saved_) {
+        // automatic modes first, so a manual exposure time or focus is accepted again
+        std::vector<std::pair<unsigned, int>> order(original_.begin(), original_.end());
+        auto modeFirst = [](unsigned id) { return id == V4L2_CID_EXPOSURE_AUTO || id == V4L2_CID_FOCUS_AUTO || id == V4L2_CID_AUTO_WHITE_BALANCE; };
+        std::stable_sort(order.begin(), order.end(), [&](const auto& a, const auto& b) { return modeFirst(a.first) > modeFirst(b.first); });
+        for (const auto& [id, value] : order) {
             v4l2_control c{};
             c.id = id;
             c.value = value;
             xioctl(fd_, VIDIOC_S_CTRL, &c);
         }
-        saved_.clear();
+        original_.clear();
     }
+    std::vector<CameraControl> controls() const override {
+        std::vector<CameraControl> out;
+        for (const Ctl& c : table()) {
+            v4l2_queryctrl q{};
+            q.id = c.id;
+            if (xioctl(fd_, VIDIOC_QUERYCTRL, &q) < 0 || (q.flags & V4L2_CTRL_FLAG_DISABLED)) continue;
+            v4l2_control v{};
+            v.id = c.id;
+            if (xioctl(fd_, VIDIOC_G_CTRL, &v) < 0) continue;
+            CameraControl k;
+            k.name = QString::fromLatin1(c.name);
+            k.label = QString::fromLatin1(c.label);
+            k.kind = q.type == V4L2_CTRL_TYPE_BOOLEAN ? CameraControl::Bool : q.type == V4L2_CTRL_TYPE_MENU ? CameraControl::Menu : CameraControl::Int;
+            k.min = q.minimum, k.max = q.maximum, k.step = std::max(1, int(q.step)), k.def = q.default_value, k.value = v.value;
+            k.inactive = q.flags & (V4L2_CTRL_FLAG_INACTIVE | V4L2_CTRL_FLAG_READ_ONLY | V4L2_CTRL_FLAG_GRABBED);
+            if (k.kind == CameraControl::Menu)
+                for (int i = k.min; i <= k.max; ++i) {
+                    v4l2_querymenu m{};
+                    m.id = c.id;
+                    m.index = unsigned(i);
+                    k.menu << (xioctl(fd_, VIDIOC_QUERYMENU, &m) == 0 ? QString::fromUtf8(reinterpret_cast<const char*>(m.name)) : QString());
+                }
+            out.push_back(k);
+        }
+        return out;
+    }
+    bool setControl(const QString& name, int value, QString* error) override {
+        for (const Ctl& c : table())
+            if (name == QLatin1String(c.name)) {
+                if (set(c.id, value)) return true;
+                if (error) *error = QStringLiteral("%1: not accepted by the camera").arg(name);
+                return false;
+            }
+        if (error) *error = QStringLiteral("no setting '%1' on this camera").arg(name);
+        return false;
+    }
+    void resetControls() override { defaultControls(); }
+    QString key() const override { return card_ + QLatin1Char('@') + bus_; }
     bool openDevice(const QString& dev, QString* error) {
         dev_ = dev;
         if (!Camera::systemCamerasAllowed()) {   // tests and screenshots: never a real camera
@@ -432,6 +617,7 @@ public:
             return false;
         }
         card_ = QString::fromUtf8(reinterpret_cast<const char*>(cap.card)).trimmed();
+        bus_ = QString::fromUtf8(reinterpret_cast<const char*>(cap.bus_info)).trimmed();
         if (const int c = card_.indexOf(QStringLiteral(": ")); c > 0 && card_.mid(c + 2).startsWith(card_.left(c)))
             card_ = card_.mid(c + 2);   // "HD USB Camera: HD USB Camera"
         if (!hasMjpeg(fd_)) {
@@ -466,7 +652,7 @@ public:
     CameraMode mode() const override { return mode_; }
     bool start(const CameraMode& m, QString* error) override {
         stop();
-        if (saved_.empty()) defaultControls();
+        if (original_.empty()) defaultControls();
         v4l2_format f{};
         f.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         f.fmt.pix.width = m.w, f.fmt.pix.height = m.h;
@@ -554,7 +740,8 @@ private:
     int fd_ = -1;
     bool streaming_ = false;
     std::vector<std::pair<void*, std::size_t>> bufs_;
-    std::vector<std::pair<unsigned, int>> saved_;   // controls changed to their defaults, with the values found
+    std::map<unsigned, int> original_;   // every control LibreTap changed, with the value it found
+    QString bus_;
     CameraMode mode_;
 };
 #endif
@@ -591,6 +778,10 @@ std::vector<CameraInfo> Camera::list(bool withDemo) {
     }
     const QString ff = qEnvironmentVariable("LIBRETAP_FFMPEG_CAMERA");   // testing: any ffmpeg input, e.g. lavfi:testsrc2
     if (!ff.isEmpty()) out.push_back({QStringLiteral("ffmpeg:") + ff, QStringLiteral("ffmpeg: %1").arg(ff)});
+    if (qEnvironmentVariableIntValue("LIBRETAP_SIM_CAMERA")) {   // tests: a simulated camera with picture controls
+        out.push_back({QStringLiteral("sim"), QStringLiteral("Simulated camera")});
+        out.push_back({QStringLiteral("sim:manualfocus"), QStringLiteral("Simulated camera (manual focus)")});
+    }
     if (withDemo || qEnvironmentVariableIntValue("LIBRETAP_DEMO_CAMERA"))   // screenshots: the pretend PC as a camera
         out.push_back({QStringLiteral("demo"), QStringLiteral("Demo camera (a pretend instrument PC)")});
     return out;
@@ -598,6 +789,7 @@ std::vector<CameraInfo> Camera::list(bool withDemo) {
 
 std::unique_ptr<Camera> Camera::open(const QString& id, QString* error) {
     if (id == QLatin1String("demo")) return std::make_unique<DemoCamera>();
+    if (id == QLatin1String("sim") || id == QLatin1String("sim:manualfocus")) return std::make_unique<SimCamera>(id == QLatin1String("sim"));
     if (id.startsWith(QLatin1String("ffmpeg:"))) {
         const QString spec = id.mid(7);
         if (!spec.startsWith(QLatin1String("lavfi:")) && !systemCamerasAllowed()) {

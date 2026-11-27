@@ -61,6 +61,13 @@ const char* const kUsage = R"(LibreTapCLI — record what old vendor software sa
   LibreTapCLI import-usbpcap FILE [--device VID:PID|ADDRESS]… [--hubs] [--all] [--name NAME]
                                              a Windows USBPcap capture as a new recording, chosen devices only
                                              (without --device: lists the devices; keyboards may hold passwords)
+  LibreTapCLI camera [--id ID]               the camera's picture: readability of the screen's text, screen region,
+                                             settings (the running LibreTap's camera, else opens ID or the first)
+  LibreTapCLI camera set NAME=VALUE…         change settings (exposure_auto, exposure, gain, brightness, contrast,
+                                             sharpness, focus_auto, focus, …; Linux cameras); saved for this camera
+  LibreTapCLI camera reset | optimise        camera defaults | set exposure and focus for the screen
+  LibreTapCLI camera region auto|whole|X,Y,W,H   where the screen is (fractions of the picture)
+  LibreTapCLI camera still FILE.jpg          save the current full-resolution picture
   LibreTapCLI tick [copy FOLDER]             the Tick that came with LibreTap; `copy` puts it in FOLDER/Tick
                                              (e.g. a USB stick) to run on the old PC without installing
 
@@ -221,6 +228,7 @@ int cmdRecord(const QStringList& args) {
     }
     Recorder rec;
     rec.setCamera(&feed);
+    rec.cameraHandler = [&](const QJsonObject& r) { return cameraCommand(&feed, r); };
     ControlServer server([&](const QJsonObject& r) { return rec.handleCommand(r); });
     QString err;
     if (!server.listen(&err)) return fail(err);
@@ -822,6 +830,108 @@ QJsonObject sessionSummary(const ProjectSession& ps) {
             {QStringLiteral("bad_lines"), s.badLines}};
 }
 
+void printPicture(const QJsonObject& o) {
+    out(QStringLiteral("Camera: %1, %2 × %3").arg(o.value(QStringLiteral("camera")).toString()).arg(o.value(QStringLiteral("width")).toInt())
+            .arg(o.value(QStringLiteral("height")).toInt()));
+    const QJsonObject reg = o.value(QStringLiteral("region")).toObject();
+    const QJsonArray box = reg.value(QStringLiteral("box")).toArray();
+    const QString mode = reg.value(QStringLiteral("mode")).toString();
+    QString where = box.size() == 4 ? QStringLiteral("at %1 %, %2 %, %3 % × %4 % of the picture").arg(box[0].toDouble() * 100, 0, 'f', 0)
+                                          .arg(box[1].toDouble() * 100, 0, 'f', 0).arg(box[2].toDouble() * 100, 0, 'f', 0).arg(box[3].toDouble() * 100, 0, 'f', 0)
+                                    : QStringLiteral("whole picture");
+    out(QStringLiteral("Screen: %1 (%2)").arg(where, mode == QLatin1String("auto") ? QStringLiteral("found automatically")
+                                                     : mode == QLatin1String("manual") ? QStringLiteral("drawn") : QStringLiteral("whole picture chosen")));
+    const QJsonObject r = o.value(QStringLiteral("readability")).toObject();
+    out(QStringLiteral("Picture: %1 (score %2; sharpness %3, contrast %4, burnt out %5 %)").arg(r.value(QStringLiteral("verdict")).toString())
+            .arg(r.value(QStringLiteral("score")).toInt()).arg(r.value(QStringLiteral("sharpness")).toDouble()).arg(r.value(QStringLiteral("contrast")).toDouble())
+            .arg(r.value(QStringLiteral("clipped")).toDouble() * 100, 0, 'f', 1));
+    const QJsonArray cs = o.value(QStringLiteral("controls")).toArray();
+    if (cs.isEmpty()) out(QStringLiteral("Settings: none that LibreTap can change on this camera"));
+    else out(QStringLiteral("Settings:"));
+    for (const QJsonValue& v : cs) {
+        const QJsonObject c = v.toObject();
+        QString val = QString::number(c.value(QStringLiteral("value")).toInt());
+        const QString vt = c.value(QStringLiteral("value_text")).toString();
+        if (!vt.isEmpty()) val += QStringLiteral(" (%1)").arg(vt);
+        out(QStringLiteral("  %1 %2 = %3   default %4, range %5–%6%7").arg(c.value(QStringLiteral("label")).toString(), -26)
+                .arg(c.value(QStringLiteral("name")).toString(), -18).arg(val).arg(c.value(QStringLiteral("default")).toInt())
+                .arg(c.value(QStringLiteral("min")).toInt()).arg(c.value(QStringLiteral("max")).toInt())
+                .arg(c.value(QStringLiteral("inactive")).toBool() ? QStringLiteral("; no effect in this mode") : QString()));
+    }
+    const QString last = o.value(QStringLiteral("last_optimise")).toString();
+    if (!last.isEmpty()) out(QStringLiteral("Last Optimise: %1").arg(last));
+    if (o.contains(QStringLiteral("still"))) out(QStringLiteral("Saved: %1").arg(o.value(QStringLiteral("still")).toString()));
+}
+
+int cmdCamera(QStringList args) {
+    QString id;
+    if (const int i = args.indexOf(QStringLiteral("--id")); i >= 0 && i + 1 < args.size()) {
+        id = args[i + 1];
+        args.remove(i, 2);
+    }
+    QJsonObject req{{QStringLiteral("cmd"), QStringLiteral("camera")}};
+    const QString sub = args.value(0);
+    if (sub == QLatin1String("set")) {
+        QJsonObject set;
+        for (const QString& a : args.mid(1)) {
+            const int eq = a.indexOf(QLatin1Char('='));
+            bool ok = false;
+            const int v = eq > 0 ? a.mid(eq + 1).toInt(&ok) : 0;
+            if (!ok) return fail(QStringLiteral("camera set NAME=VALUE (whole numbers), e.g. camera set exposure_auto=1 exposure=120"), 2);
+            set.insert(a.left(eq), v);
+        }
+        if (set.isEmpty()) return fail(QStringLiteral("camera set NAME=VALUE…"), 2);
+        req.insert(QStringLiteral("set"), set);
+    } else if (sub == QLatin1String("reset")) {
+        req.insert(QStringLiteral("reset"), true);
+    } else if (sub == QLatin1String("optimise") || sub == QLatin1String("optimize")) {
+        req.insert(QStringLiteral("optimise"), true);
+    } else if (sub == QLatin1String("still")) {
+        if (args.size() < 2) return fail(QStringLiteral("camera still FILE.jpg"), 2);
+        req.insert(QStringLiteral("still"), QFileInfo(args[1]).absoluteFilePath());
+    } else if (sub == QLatin1String("region")) {
+        const QString a = args.value(1);
+        if (a == QLatin1String("auto") || a == QLatin1String("whole")) req.insert(QStringLiteral("region"), a);
+        else {
+            const QStringList n = a.split(QLatin1Char(','));
+            if (n.size() != 4) return fail(QStringLiteral("camera region auto|whole|X,Y,W,H (fractions 0..1)"), 2);
+            req.insert(QStringLiteral("region"), QJsonArray{n[0].toDouble(), n[1].toDouble(), n[2].toDouble(), n[3].toDouble()});
+        }
+    } else if (!sub.isEmpty()) {
+        return fail(QStringLiteral("camera [set|reset|optimise|still|region]"), 2);
+    }
+    // the running LibreTap's camera, if there is one
+    QJsonObject ans;
+    QString err;
+    if (id.isEmpty() && controlRequest(req, &ans, &err, 30000)) {
+        if (!ans.value(QStringLiteral("ok")).toBool()) return fail(ans.value(QStringLiteral("error")).toString());
+    } else {
+        if (id.isEmpty()) {
+            const auto list = Camera::list();
+            if (list.empty()) return fail(QStringLiteral("no camera found"));
+            id = list.front().id;
+        }
+        CameraFeed feed;
+        QEventLoop loop;
+        QString camErr;
+        QObject::connect(&feed, &CameraFeed::failed, &loop, [&](const QString& e) { camErr = e, loop.quit(); });
+        QTimer poll;
+        QObject::connect(&poll, &QTimer::timeout, &loop, [&] { if (feed.readability().valid && !feed.optimising()) loop.quit(); });
+        QTimer::singleShot(30000, &loop, &QEventLoop::quit);
+        feed.open(id);
+        QTimer::singleShot(2500, &loop, [&] { poll.start(200); });   // after the first measurements (and Optimise, if it runs)
+        loop.exec();
+        if (!camErr.isEmpty()) return fail(QStringLiteral("camera: ") + camErr);
+        if (!feed.readability().valid) return fail(QStringLiteral("camera: %1 sent no picture").arg(id));
+        ans = cameraCommand(&feed, req);
+        feed.close();
+        if (!ans.value(QStringLiteral("ok")).toBool()) return fail(ans.value(QStringLiteral("error")).toString());
+    }
+    if (gJson) outJson(ans);
+    else printPicture(ans);
+    return 0;
+}
+
 int cmdTick(const QStringList& args) {
     if (args.value(0) == QLatin1String("copy")) {
         if (args.size() < 2) return fail(QStringLiteral("usage: LibreTapCLI tick copy FOLDER"), 2);
@@ -1034,7 +1144,7 @@ int main(int argc, char** argv) {
     const QString cmd = raw.isEmpty() ? QString() : raw.takeFirst();
     // recording draws (the demo camera) and encodes JPEG: a GUI application without a display
     std::unique_ptr<QCoreApplication> app;
-    if (cmd == QLatin1String("record")) {
+    if (cmd == QLatin1String("record") || cmd == QLatin1String("camera")) {
         if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) qputenv("QT_QPA_PLATFORM", "offscreen");
         app = std::make_unique<QGuiApplication>(argc, argv);
     } else {
@@ -1067,6 +1177,7 @@ int main(int argc, char** argv) {
     if (cmd == QLatin1String("guess")) return cmdGuess(raw);
     if (cmd == QLatin1String("sessions")) return cmdSessions();
     if (cmd == QLatin1String("tick")) return cmdTick(raw);
+    if (cmd == QLatin1String("camera")) return cmdCamera(raw);
     if (cmd == QLatin1String("show")) return cmdShow(raw);
     if (cmd == QLatin1String("match")) return cmdMatch(raw);
     if (cmd == QLatin1String("import")) return cmdImport(raw);

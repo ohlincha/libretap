@@ -34,7 +34,16 @@ LibreTapCLI record [--a P --b P] [--baud N|auto] [--usb-pico PORT|auto] [--ether
 LibreTapCLI status | start | mark "note" | sync | stop                      control the running recorder or window
 LibreTapCLI import REC TICK_SESSION          add a Tick session and match the clocks
 LibreTapCLI import-usbpcap FILE --device VID:PID … [--hubs]               a USBPcap capture, chosen devices only
+LibreTapCLI camera [--id ID] [--json]        camera picture: readability of the screen's text, screen region, settings
+LibreTapCLI camera optimise | reset          set exposure and focus for the screen | camera defaults
+LibreTapCLI camera set exposure_auto=1 exposure=120 focus_auto=1 …        change settings (Linux cameras; saved)
+LibreTapCLI camera region auto|whole|X,Y,W,H | still FILE.jpg              where the screen is | the current picture
 ```
+
+`camera` talks to the running window or recorder when there is one (otherwise it opens the camera itself). Check
+the verdict before recording: anything but "Text readable" means the stills will not show the settings; run
+`camera optimise`, then look at `camera still` yourself. Settings are Linux-only for now (Windows/macOS cameras go
+through ffmpeg); the readability check works everywhere. Its thresholds are calibrated on synthetic pictures only.
 
 Analysis (REC = recording folder, name, or `latest`; a moment = `--mark N` or `--at SECONDS`):
 
@@ -59,7 +68,8 @@ LibreTapCLI match A B [--save] | decode-usb DUMP | pcap FILE
 ## The workflow with the operator
 
 1. **Before**: ask what the instrument is, how it connects (RS-232, USB, Ethernet), what the vendor software is.
-   `LibreTapCLI ports --json` to see what is plugged in. For RS-232, `guess` the baud rate while the software talks.
+   `LibreTapCLI ports --json` to see what is plugged in. With a camera: `LibreTapCLI camera` until it says "Text
+   readable" (`camera optimise`; ask the operator to move the camera closer or square to the screen if not). For RS-232, `guess` the baud rate while the software talks.
 2. **Record**: `LibreTapCLI record … &` (or the operator presses Record in the window). Ask the operator to change
    **one setting at a time** in the vendor software. Before each change: `LibreTapCLI mark "integration time 1 s → 2 s"`
    (the operator can also press Mark / the space bar). Ask them to save the vendor software's result file for each

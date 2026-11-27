@@ -150,6 +150,24 @@ void PictureView::paintEvent(QPaintEvent*) {
         s.scale(area.size(), Qt::KeepAspectRatio);
         const QRectF target(area.center().x() - s.width() / 2, area.center().y() - s.height() / 2, s.width(), s.height());
         p.drawImage(target, img_);
+        target_ = target;
+        auto frac = [&](const QRectF& f) { return QRectF(target.x() + f.x() * target.width(), target.y() + f.y() * target.height(), f.width() * target.width(), f.height() * target.height()); };
+        if (!region_.isEmpty() && !dragging_) {   // the screen region
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(QColor(0x4f, 0x8f, 0xc0), 2, Qt::DashLine));
+            p.drawRect(frac(region_));
+        }
+        if (dragging_ && !drag_.isEmpty()) {
+            p.setBrush(QColor(0x4f, 0x8f, 0xc0, 40));
+            p.setPen(QPen(QColor(0x4f, 0x8f, 0xc0), 2));
+            p.drawRect(frac(drag_));
+        }
+        if (drawing_ && !dragging_) {
+            p.setPen(Qt::white);
+            p.fillRect(QRectF(target.x(), target.y(), target.width(), fontMetrics().height() + 10), QColor(0, 0, 0, 140));
+            p.drawText(QRectF(target.x(), target.y(), target.width(), fontMetrics().height() + 10), Qt::AlignCenter,
+                       QStringLiteral("Drag a box around the instrument PC's screen"));
+        }
         if (!highlights_.empty()) {   // what changed: amber outlines
             const double k = target.width() / img_.width();
             p.setBrush(Qt::NoBrush);
@@ -162,6 +180,36 @@ void PictureView::paintEvent(QPaintEvent*) {
         p.setPen(theme::dim());
         p.drawText(r.adjusted(10, 0, -10, -6), Qt::AlignBottom | Qt::AlignHCenter, caption_);
     }
+}
+
+QPointF PictureView::toPicture(const QPointF& p) const {
+    if (target_.isEmpty()) return {};
+    return {std::clamp((p.x() - target_.x()) / target_.width(), 0.0, 1.0), std::clamp((p.y() - target_.y()) / target_.height(), 0.0, 1.0)};
+}
+
+void PictureView::mousePressEvent(QMouseEvent* e) {
+    if (!drawing_ || img_.isNull()) return QWidget::mousePressEvent(e);
+    dragging_ = true;
+    dragStart_ = toPicture(e->position());
+    drag_ = {};
+}
+
+void PictureView::mouseMoveEvent(QMouseEvent* e) {
+    if (!dragging_) return QWidget::mouseMoveEvent(e);
+    drag_ = QRectF(dragStart_, toPicture(e->position())).normalized();
+    update();
+}
+
+void PictureView::mouseReleaseEvent(QMouseEvent* e) {
+    if (!dragging_) return QWidget::mouseReleaseEvent(e);
+    dragging_ = false;
+    drag_ = QRectF(dragStart_, toPicture(e->position())).normalized();
+    if (drag_.width() > 0.05 && drag_.height() > 0.05) {
+        region_ = drag_;
+        setDrawing(false);
+        emit regionDrawn(drag_);
+    }
+    update();
 }
 
 TimelineBar::TimelineBar(QWidget* parent) : QWidget(parent) {

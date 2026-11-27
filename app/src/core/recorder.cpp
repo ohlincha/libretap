@@ -169,7 +169,11 @@ QJsonObject Recorder::handleCommand(const QJsonObject& req) {
         if (!startHandler) return fail(QStringLiteral("this recorder cannot be started remotely"));
         return startHandler(req);
     }
-    return fail(QStringLiteral("unknown command '%1' (status, start, mark, sync, stop)").arg(cmd));
+    if (cmd == QLatin1String("camera")) {
+        if (!cameraHandler) return fail(QStringLiteral("no camera in this LibreTap"));
+        return cameraHandler(req);
+    }
+    return fail(QStringLiteral("unknown command '%1' (status, start, mark, sync, stop, camera)").arg(cmd));
 }
 
 }  // namespace lt

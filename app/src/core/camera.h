@@ -11,7 +11,9 @@
 //
 // Listing cameras never opens a device (Linux: names from /sys/class/video4linux), so merely starting LibreTap does
 // not wake a camera. LIBRETAP_NO_SYSTEM_CAMERAS=1 hides and refuses all real cameras (tests, screenshots);
-// LIBRETAP_FFMPEG_CAMERA=<format>:<input> adds an ffmpeg input to the list.
+// LIBRETAP_FFMPEG_CAMERA=<format>:<input> adds an ffmpeg input to the list. "sim" (and "sim:manualfocus", without
+// autofocus) is a simulated camera with picture controls, filming a screen with text (tests; listed when
+// LIBRETAP_SIM_CAMERA=1).
 #include <QByteArray>
 #include <QString>
 #include <QStringList>
@@ -36,6 +38,18 @@ struct CameraFrame {
     int sequence = 0;              // the driver's frame counter (gaps: frames the camera dropped)
 };
 
+// A picture setting of a camera (V4L2 controls; the simulated camera). Names are LibreTap's own, the same on
+// every camera: exposure_auto, exposure (0.1 ms), gain, brightness, contrast, saturation, sharpness, focus_auto,
+// focus, white_balance_auto, backlight, power_line.
+struct CameraControl {
+    enum Kind { Int, Bool, Menu };
+    QString name, label;
+    Kind kind = Int;
+    int min = 0, max = 0, step = 1, def = 0, value = 0;
+    bool inactive = false;         // has no effect in the current mode (e.g. exposure time under automatic exposure)
+    QStringList menu;              // Menu: labels for min..max (empty strings for values the camera lacks)
+};
+
 class Camera {
 public:
     virtual ~Camera() = default;
@@ -51,6 +65,18 @@ public:
     virtual bool grab(CameraFrame* out, QString* error) = 0;
     virtual void stop() = 0;
     virtual CameraMode mode() const = 0;   // as started (the size and rate the camera accepted)
+
+    // Picture settings (none on ffmpeg and demo cameras). Changes are undone when the camera is closed: the camera
+    // is left as LibreTap found it.
+    virtual std::vector<CameraControl> controls() const { return {}; }
+    virtual bool setControl(const QString& name, int value, QString* error) {
+        (void)name, (void)value;
+        if (error) *error = QStringLiteral("this camera's settings cannot be changed by LibreTap");
+        return false;
+    }
+    virtual void resetControls() {}   // the camera's own defaults, with automatic exposure and autofocus
+    // Identifies this camera across restarts and ports, for its saved settings.
+    virtual QString key() const { return name(); }
 };
 
 QString ffmpegProgram();   // $LIBRETAP_FFMPEG, next to the program (Windows/macOS bundles), Homebrew, or PATH

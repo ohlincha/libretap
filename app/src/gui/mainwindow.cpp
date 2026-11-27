@@ -26,6 +26,8 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QShortcut>
+#include <QSignalBlocker>
+#include <QSlider>
 #include <QScrollArea>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -210,6 +212,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         o.insert(QStringLiteral("ok"), true);
         return o;
     };
+    rec_.cameraHandler = [this](const QJsonObject& r) { return cameraCommand(&feed_, r); };
     control_ = std::make_unique<ControlServer>([this](const QJsonObject& r) { return rec_.handleCommand(r); });
     if (!control_->listen(&controlProblem_)) statusBar()->showMessage(controlProblem_);
     else statusBar()->showMessage(QStringLiteral("Agents and scripts can control this window: LibreTapCLI status, mark, sync, stop"));
@@ -233,7 +236,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         camText_->setText(QStringLiteral("Camera problem: %1").arg(t));
         setDot(camDot_, "warn");
     });
+    connect(&feed_, &CameraFeed::readabilityChanged, this, &MainWindow::updateReadability);
+    connect(&feed_, &CameraFeed::optimised, this, [this](const QString& report) {
+        statusBar()->showMessage(QStringLiteral("Optimise picture: ") + report, 15000);
+        updateReadability();
+    });
     connect(&feed_, &CameraFeed::opened, this, [this](const QString& name) {
+        pictureRow_->setVisible(!demo_);
+        readText_->setText(QStringLiteral("Checking the picture…"));
+        setDot(readDot_, "off");
         const CameraMode m = feed_.mode();
         camText_->setText(QStringLiteral("<b>Camera ready.</b> Pictures of %1 × %2 pixels.").arg(m.w).arg(m.h));
         (void)name;
@@ -278,7 +289,34 @@ QWidget* MainWindow::buildRecordPage() {
 
     preview_ = new PictureView;
     preview_->setPlaceholder(QStringLiteral("No camera.\nThe traffic is recorded all the same."));
-    top->addWidget(preview_, 3);
+    auto* previewCol = new QVBoxLayout;
+    previewCol->setSpacing(6);
+    previewCol->addWidget(preview_, 1);
+    // is the screen's text readable in the picture?
+    pictureRow_ = new QWidget;
+    auto* pr = new QHBoxLayout(pictureRow_);
+    pr->setContentsMargins(4, 0, 4, 0);
+    pr->setSpacing(8);
+    readDot_ = dot();
+    readText_ = new QLabel;
+    readText_->setObjectName(QStringLiteral("readability"));
+    optimiseBtn_ = new QPushButton(QStringLiteral("Optimise picture"));
+    optimiseBtn_->setToolTip(QStringLiteral("Set exposure and focus for the screen's text"));
+    pictureBtn_ = new QPushButton(QStringLiteral("Picture…"));
+    pictureBtn_->setToolTip(QStringLiteral("Camera settings and where the screen is"));
+    pr->addWidget(readDot_);
+    pr->addWidget(readText_, 1);
+    pr->addWidget(optimiseBtn_);
+    pr->addWidget(pictureBtn_);
+    pictureRow_->hide();
+    previewCol->addWidget(pictureRow_);
+    top->addLayout(previewCol, 3);
+    connect(optimiseBtn_, &QPushButton::clicked, this, [this] {
+        feed_.optimise();
+        readText_->setText(QStringLiteral("Optimising…"));
+    });
+    connect(pictureBtn_, &QPushButton::clicked, this, &MainWindow::pictureDialog);
+    connect(preview_, &PictureView::regionDrawn, this, [this](const QRectF& box) { feed_.setRegion(QStringLiteral("manual"), box); });
 
     // the side column scrolls when everything is plugged in and the window is small
     auto* sideScroll = new QScrollArea;
@@ -697,10 +735,155 @@ void MainWindow::refreshConnections() {
     updateRecordUi();
 }
 
+void MainWindow::updateReadability() {
+    const Readability r = feed_.readability();
+    preview_->setRegion(feed_.isOpen() ? feed_.region() : QRectF());
+    if (feed_.optimising()) {
+        readText_->setText(QStringLiteral("Optimising…"));
+        setDot(readDot_, "off");
+        return;
+    }
+    if (!r.valid) return;
+    const QString where = feed_.region().isEmpty() ? QStringLiteral("whole picture") : QStringLiteral("screen");
+    readText_->setText(QStringLiteral("<b>%1</b> (%2, score %3)").arg(r.verdict, where).arg(r.score));
+    readText_->setToolTip(QStringLiteral("Sharpness %1, contrast %2, burnt out %3 %. Checked on the %4 about once a second.")
+                              .arg(r.sharpness, 0, 'f', 1).arg(r.contrast, 0, 'f', 0).arg(r.clipped * 100, 0, 'f', 1).arg(where));
+    setDot(readDot_, r.ok() ? "ok" : "warn");
+}
+
+void MainWindow::pictureDialog() {
+    if (pictureDlg_) {
+        pictureDlg_->raise();
+        pictureDlg_->activateWindow();
+        return;
+    }
+    auto* d = new QDialog(this);
+    pictureDlg_ = d;
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->setWindowTitle(QStringLiteral("Camera picture"));
+    connect(d, &QObject::destroyed, this, [this] { pictureDlg_ = nullptr; });
+    auto* v = new QVBoxLayout(d);
+    // where the screen is
+    auto* regRow = new QHBoxLayout;
+    regRow->addWidget(new QLabel(QStringLiteral("Screen")));
+    auto* reg = new QComboBox;
+    reg->setObjectName(QStringLiteral("regionMode"));
+    reg->addItem(QStringLiteral("Found automatically"), QStringLiteral("auto"));
+    reg->addItem(QStringLiteral("Whole picture"), QStringLiteral("whole"));
+    reg->addItem(QStringLiteral("Drawn on the picture…"), QStringLiteral("manual"));
+    reg->setCurrentIndex(std::max(0, reg->findData(feed_.regionMode())));
+    regRow->addWidget(reg, 1);
+    v->addLayout(regRow);
+    connect(reg, &QComboBox::activated, this, [this, reg] {
+        const QString m = reg->currentData().toString();
+        if (m == QLatin1String("manual")) preview_->setDrawing(true);
+        else {
+            preview_->setDrawing(false);
+            feed_.setRegion(m);
+        }
+    });
+    // the camera's settings
+    auto* form = new QFormLayout;
+    form->setObjectName(QStringLiteral("pictureControls"));
+    v->addLayout(form);
+    const auto controls = feed_.controls();
+    struct Bound { QString name; QWidget* w; QLabel* value; };
+    auto bound = std::make_shared<std::vector<Bound>>();
+    for (const CameraControl& c : controls) {
+        if (c.kind == CameraControl::Bool) {
+            auto* cb = new QCheckBox;
+            cb->setObjectName(c.name);
+            cb->setChecked(c.value);
+            connect(cb, &QCheckBox::toggled, this, [this, n = c.name](bool on) { feed_.setControl(n, on ? 1 : 0); });
+            form->addRow(c.label, cb);
+            bound->push_back({c.name, cb, nullptr});
+        } else if (c.kind == CameraControl::Menu) {
+            auto* cb = new QComboBox;
+            cb->setObjectName(c.name);
+            for (int i = c.min; i <= c.max; ++i) {
+                const QString t = i - c.min < c.menu.size() ? c.menu[i - c.min] : QString();
+                if (!t.isEmpty()) cb->addItem(t, i);
+            }
+            cb->setCurrentIndex(cb->findData(c.value));
+            connect(cb, &QComboBox::activated, this, [this, cb, n = c.name] { feed_.setControl(n, cb->currentData().toInt()); });
+            form->addRow(c.label, cb);
+            bound->push_back({c.name, cb, nullptr});
+        } else {
+            auto* row = new QWidget;
+            auto* h = new QHBoxLayout(row);
+            h->setContentsMargins(0, 0, 0, 0);
+            auto* sl = new QSlider(Qt::Horizontal);
+            sl->setObjectName(c.name);
+            sl->setRange(c.min, c.max);
+            sl->setSingleStep(c.step);
+            sl->setPageStep(std::max(c.step, (c.max - c.min) / 16));
+            sl->setValue(c.value);
+            sl->setMinimumWidth(220);
+            auto* val = new QLabel(QString::number(c.value));
+            val->setMinimumWidth(44);
+            h->addWidget(sl, 1);
+            h->addWidget(val);
+            connect(sl, &QSlider::valueChanged, val, [val](int x) { val->setNum(x); });
+            connect(sl, &QSlider::sliderReleased, this, [this, sl, n = c.name] { feed_.setControl(n, sl->value()); });
+            connect(sl, &QSlider::actionTriggered, this, [this, sl, n = c.name](int a) {
+                if (a != QAbstractSlider::SliderMove) QTimer::singleShot(0, this, [this, sl, n] { feed_.setControl(n, sl->value()); });
+            });
+            form->addRow(c.label, row);
+            bound->push_back({c.name, sl, val});
+        }
+    }
+    if (controls.empty()) {
+        auto* l = new QLabel(QStringLiteral("LibreTap cannot change this camera's settings. Camera settings are available on Linux only "
+                                            "for now (on Windows and macOS LibreTap reads cameras through ffmpeg). The readability check works."));
+        l->setWordWrap(true);
+        v->addWidget(l);
+    }
+    // keep the widgets in step with the camera (Optimise, automatic modes)
+    auto refresh = [this, bound] {
+        for (const CameraControl& c : feed_.controls())
+            for (const Bound& b : *bound) {
+                if (b.name != c.name) continue;
+                QSignalBlocker block(b.w);
+                if (auto* cb = qobject_cast<QCheckBox*>(b.w)) cb->setChecked(c.value);
+                else if (auto* co = qobject_cast<QComboBox*>(b.w)) co->setCurrentIndex(co->findData(c.value));
+                else if (auto* sl = qobject_cast<QSlider*>(b.w); sl && !sl->isSliderDown()) {
+                    sl->setValue(c.value);
+                    if (b.value) b.value->setNum(c.value);
+                }
+                b.w->setEnabled(!c.inactive);
+            }
+    };
+    connect(&feed_, &CameraFeed::controlsChanged, d, refresh);
+    refresh();
+    auto* buttons = new QHBoxLayout;
+    auto* reset = new QPushButton(QStringLiteral("Reset to camera defaults"));
+    reset->setEnabled(!controls.empty());
+    auto* opt = new QPushButton(QStringLiteral("Optimise picture"));
+    opt->setEnabled(!controls.empty());
+    auto* close = new QPushButton(QStringLiteral("Close"));
+    buttons->addWidget(reset);
+    buttons->addWidget(opt);
+    buttons->addStretch(1);
+    buttons->addWidget(close);
+    v->addLayout(buttons);
+    auto* note = new QLabel(QStringLiteral("Changes are saved for this camera. When LibreTap closes the camera, its settings return to what they were."));
+    note->setWordWrap(true);
+    note->setObjectName(QStringLiteral("dimText"));
+    v->addWidget(note);
+    connect(reset, &QPushButton::clicked, this, [this] { feed_.resetControls(); });
+    connect(opt, &QPushButton::clicked, optimiseBtn_, &QPushButton::click);
+    connect(close, &QPushButton::clicked, d, &QDialog::close);
+    d->show();
+}
+
 void MainWindow::openCamera(const QString& id) {
     if (id == cameraId_ && feed_.isOpen()) return;
     feed_.close();
     preview_->setImage({});
+    preview_->setRegion({});
+    preview_->setDrawing(false);
+    pictureRow_->hide();
+    if (pictureDlg_) pictureDlg_->close();   // its settings belonged to the camera being closed
     cameraId_ = id;
     if (id.isEmpty()) {
         preview_->setPlaceholder(QStringLiteral("Camera off.\nThe traffic is recorded all the same."));

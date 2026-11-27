@@ -5,6 +5,12 @@
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QtTest>
+#include "core/camerasource.h"
+#include <QLabel>
+#include <QComboBox>
+#include <QSignalSpy>
+#include <QDialog>
+#include <QSlider>
 
 #include <atomic>
 #include <thread>
@@ -37,6 +43,49 @@ private slots:
     void initTestCase() {
         qputenv("LIBRETAP_HOME", ws_.path().toLocal8Bit());
         qputenv("XDG_CONFIG_HOME", ws_.filePath(QStringLiteral("config")).toLocal8Bit());
+    }
+
+    // the simulated camera with picture controls: readability under the live view, Optimise by itself, the Picture
+    // panel reaching the camera
+    void cameraPicture() {
+        qputenv("LIBRETAP_SIM_CAMERA", "1");
+        gui::MainWindow w;
+        w.resize(1400, 900);
+        w.show();
+        auto* combo = w.findChild<QComboBox*>();
+        (void)combo;
+        QTRY_VERIFY_WITH_TIMEOUT(w.camera().isOpen(), 5000);
+        QSignalSpy opt(&w.camera(), &CameraFeed::optimised);
+        QVERIFY(opt.wait(30000));
+        QLabel* read = w.findChild<QLabel*>(QStringLiteral("readability"));
+        QVERIFY(read && read->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(read->text().contains(QStringLiteral("Text readable")), 5000);
+        // the Picture panel: a slider reaches the camera
+        QPushButton* pic = nullptr;
+        for (auto* b : w.findChildren<QPushButton*>())
+            if (b->text() == QStringLiteral("Picture…")) pic = b;
+        QVERIFY(pic);
+        pic->click();
+        QDialog* d = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT((d = w.findChild<QDialog*>()) && d->isVisible(), 3000);
+        auto* bright = d->findChild<QSlider*>(QStringLiteral("brightness"));
+        QVERIFY(bright);
+        const int before = bright->value();
+        bright->triggerAction(QAbstractSlider::SliderPageStepAdd);
+        QTRY_VERIFY_WITH_TIMEOUT([&] {
+            for (const CameraControl& c : w.camera().controls())
+                if (c.name == QLatin1String("brightness")) return c.value > before;
+            return false;
+        }(), 3000);
+        QVERIFY(d->findChild<QComboBox*>(QStringLiteral("regionMode")));
+        if (!qEnvironmentVariableIsEmpty("LIBRETAP_TEST_SHOT_CAMERA")) {
+            QTest::qWait(1200);
+            w.grab().save(qEnvironmentVariable("LIBRETAP_TEST_SHOT_CAMERA"));
+            d->grab().save(qEnvironmentVariable("LIBRETAP_TEST_SHOT_CAMERA").replace(QStringLiteral(".png"), QStringLiteral("-panel.png")));
+        }
+        d->close();
+        w.close();
+        qunsetenv("LIBRETAP_SIM_CAMERA");
     }
 
     void splashAndIcon() {

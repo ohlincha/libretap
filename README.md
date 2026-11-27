@@ -21,6 +21,11 @@ instrument.
 - **Ethernet**: a switch with port mirroring (e.g. TP-Link TL-SG105E) copies the instrument's and the PC's traffic to
   the laptop; Wireshark's dumpcap captures it, LibreTap shows the TCP/UDP conversations like serial traffic.
 - **Camera**: a full-resolution still of the instrument PC's screen every half second (only when it changes).
+  LibreTap finds the screen in the picture and says under the live view whether its text is readable (*Text
+  readable*, *Too blurred*, *Too bright*, …). *Optimise picture* sets exposure and focus for the screen;
+  *Picture…* has the camera's settings and the screen region (draw it if it is not found). The camera starts
+  from its own defaults and gets its previous settings back when LibreTap closes it. Settings: Linux cameras
+  only for now; the readability check works on every system.
 - **Tick**: a small companion program for the old PC itself (Windows 2000 to 11, separate project) records the
   screen and the vendor program's port calls in the same format. *Add Tick session…* combines its folder with
   LibreTap's recording; the clocks are lined up automatically from the traffic both saw, or with the Sync button.

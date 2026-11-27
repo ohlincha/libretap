@@ -55,6 +55,8 @@ public:
     // answered by startHandler when set (the GUI starts with its own connections), else refused.
     QJsonObject handleCommand(const QJsonObject& request);
     std::function<QJsonObject(const QJsonObject&)> startHandler;
+    // "camera" (picture settings, readability, Optimise, a still; see cameraCommand) when a camera is in use
+    std::function<QJsonObject(const QJsonObject&)> cameraHandler;
 
 signals:
     void started(const QString& projectFolder);
