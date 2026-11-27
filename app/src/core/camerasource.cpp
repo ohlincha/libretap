@@ -63,6 +63,7 @@ bool CameraFeed::open(const QString& id) {
     close();
     id_ = id;
     stop_ = false;
+    userChose_ = false;
     thread_ = QThread::create([this] { run(); });
     thread_->start();
     return true;
@@ -113,6 +114,8 @@ std::vector<CameraControl> CameraFeed::controls() const {
 }
 
 void CameraFeed::setControl(const QString& name, int value) {
+    for (const char* k : {"exposure_auto", "exposure", "gain", "focus_auto", "focus"})
+        if (name == QLatin1String(k)) userChose_ = true;   // a hand-made choice: no automatic Optimise over it
     QMutexLocker l(&mutex_);
     pending_.push_back({name, value});
 }
@@ -222,7 +225,7 @@ void CameraFeed::run() {
     const QVariantMap saved = st.value(group + QStringLiteral("/controls")).toMap();
     for (auto it = saved.begin(); it != saved.end(); ++it) cam->setControl(it.key(), it.value().toInt(), nullptr);
     // Optimise by itself, unless the user chose exposure or focus for this camera
-    bool autoOptimise = !cam->controls().empty();
+    bool autoOptimise = autoAllowed_ && !cam->controls().empty();
     for (const char* k : {"exposure_auto", "exposure", "gain", "focus_auto", "focus"})
         if (saved.contains(QLatin1String(k))) autoOptimise = false;
     {
@@ -315,7 +318,7 @@ void CameraFeed::run() {
             bool run = false;
             {
                 QMutexLocker l(&mutex_);
-                run = optimisePending_ || (autoOptimise && now - openedAt > 1.5);
+                run = optimisePending_ || (autoOptimise && !userChose_ && now - openedAt > 1.5);
                 optimisePending_ = false;
             }
             if (run) {

@@ -54,6 +54,9 @@ public:
     // unless the user saved an exposure, gain or focus setting for it.
     void optimise();
     bool optimising() const { return optimising_; }
+    // Optimise by itself after opening (the window, `record`); off for `LibreTapCLI camera`, where only
+    // `camera optimise` changes the picture. Call before open().
+    void setAutoOptimise(bool on) { autoAllowed_ = on; }
     QString lastReport() const;
     bool saveStill(const QString& path, QString* error) const;   // the latest full-resolution frame, as JPEG
     QJsonObject describePicture() const;   // controls, region, readability, last Optimise report (CLI, agents)
@@ -84,6 +87,8 @@ private:
     std::vector<std::pair<QString, int>> pending_;
     bool resetPending_ = false, optimisePending_ = false;
     std::atomic<bool> optimising_{false};
+    std::atomic<bool> autoAllowed_{true};
+    std::atomic<bool> userChose_{false};   // exposure, gain or focus set by hand since opening
     QString regionMode_ = QStringLiteral("auto"), report_;
     QRectF manualBox_, region_;
     Readability read_;

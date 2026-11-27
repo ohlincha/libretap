@@ -912,6 +912,7 @@ int cmdCamera(QStringList args) {
             id = list.front().id;
         }
         CameraFeed feed;
+        feed.setAutoOptimise(false);   // a status or a setting: nothing changes by itself
         QEventLoop loop;
         QString camErr;
         QObject::connect(&feed, &CameraFeed::failed, &loop, [&](const QString& e) { camErr = e, loop.quit(); });
