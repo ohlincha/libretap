@@ -10,6 +10,20 @@
 #define IDC_MARK  102
 #define IDC_SYNC  103
 #define IDC_NOTE  104
+#define IDC_PROG  108
+#define IDC_PLIST 1020
+#define IDC_PPICK 1022
+
+static HWND wait_dialog(const char *title)
+{
+    int i;
+    for (i = 0; i < 100; i++) {
+        HWND d = FindWindowA("#32770", title);
+        if (d) return d;
+        Sleep(100);
+    }
+    return 0;
+}
 
 int main(int argc, char **argv)
 {
@@ -29,6 +43,53 @@ int main(int argc, char **argv)
         if (argc > 2) SetWindowTextA(e, argv[2]);
         SendMessageA(e, WM_KEYDOWN, VK_RETURN, 0);
         SendMessageA(e, WM_CHAR, '\r', 0);
+    } else if (!strcmp(argv[1], "programs")) {   /* open Start a program, list it; with TEXT: choose that entry */
+        HWND d, lb;
+        int i, k, pick = -1;
+        PostMessageA(w, WM_COMMAND, MAKEWPARAM(IDC_PROG, BN_CLICKED), (LPARAM)GetDlgItem(w, IDC_PROG));
+        if (!(d = wait_dialog("Start a program"))) { printf("no Start a program dialog\n"); return 1; }
+        lb = GetDlgItem(d, IDC_PLIST);
+        k = (int)SendMessageA(lb, LB_GETCOUNT, 0, 0);
+        for (i = 0; i < k; i++) {
+            char t[400];
+            WCHAR wt[400];
+            wt[0] = 0;
+            SendMessageW(lb, LB_GETTEXT, i, (LPARAM)wt);   /* the wide form survives Wine's cross-process copy */
+            WideCharToMultiByte(CP_ACP, 0, wt, -1, t, sizeof t, 0, 0);
+            printf("  [%d] %s\n", i, t);
+            if (argc > 2 && pick < 0 && strstr(t, argv[2])) pick = i;
+        }
+        if (argc > 2 && !strcmp(argv[2], "--pick")) {
+            PostMessageA(d, WM_COMMAND, MAKEWPARAM(IDC_PPICK, BN_CLICKED), 0);
+            printf("Pick window pressed\n");
+        } else if (pick >= 0) {
+            char det[600];
+            SendMessageA(lb, LB_SETCURSEL, pick, 0);
+            SendMessageA(d, WM_COMMAND, MAKEWPARAM(IDC_PLIST, LBN_SELCHANGE), (LPARAM)lb);
+            GetDlgItemTextA(d, 1021, det, sizeof det);
+            printf("chosen [%d], details: %s\n", pick, det);
+            PostMessageA(d, WM_COMMAND, IDOK, 0);
+        } else PostMessageA(d, WM_COMMAND, IDCANCEL, 0);
+    } else if (!strcmp(argv[1], "answer")) {      /* answer Tick's next question: yes|no|ok|cancel */
+        HWND d = wait_dialog("Tick");
+        char text[1000] = "";
+        if (!d) { printf("no question\n"); return 1; }
+        {   /* the message box text is its static control 0xFFFF */
+            HWND s = GetDlgItem(d, 0xFFFF);
+            if (s) GetWindowTextA(s, text, sizeof text);
+        }
+        printf("question: %s\n", text);
+        PostMessageA(d, WM_COMMAND, !strcmp(argv[2], "yes") ? IDYES : !strcmp(argv[2], "no") ? IDNO :
+                                    !strcmp(argv[2], "ok") ? IDOK : IDCANCEL, 0);
+    } else if (!strcmp(argv[1], "activate")) {    /* bring a window to the front (by title) */
+        HWND t = FindWindowA(0, argv[2]);
+        if (!t) { printf("window %s not found\n", argv[2]); return 1; }
+        SetForegroundWindow(t);
+        printf("activated %s\n", argv[2]);
+    } else if (!strcmp(argv[1], "status")) {
+        char t[400];
+        int id;
+        for (id = 105; id <= 107; id++) { GetWindowTextA(GetDlgItem(w, id), t, sizeof t); printf("  %s\n", t); }
     } else if (!strcmp(argv[1], "sync")) {
         SendMessageA(w, WM_COMMAND, MAKEWPARAM(IDC_SYNC, BN_CLICKED), (LPARAM)GetDlgItem(w, IDC_SYNC));
     } else if (!strcmp(argv[1], "close")) {

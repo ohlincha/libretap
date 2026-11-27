@@ -30,11 +30,13 @@ at all), so it watches the screen and records marks and syncs, but does not list
    your laptop: *Copy Tick to a USB stick…*.
 2. Press **Start**. The window shows the folder it records into: `TickSessions\` next to `Tick.exe` (if that
    folder cannot be written: `Documents\TickSessions`, then the TEMP folder).
-3. **Recommended:** press **Start a program...** and pick the vendor program's `.exe` instead of starting it from
-   its usual icon. Tick starts it and records the port being opened and all its settings from the very start, and
-   nothing of Tick is ever inside a program that was already running. (Advanced... > *Listen to a running program*
-   is only for a program that is in the middle of a measurement and cannot be restarted: settings made before
-   attaching are missed; Tick reads the current ones back once with `GetCommState`. Windows 2000 and later.)
+3. **Recommended:** press **Start a program...** and choose the program that talks to the instrument: from the
+   list (programs running now, Start menu and Desktop shortcuts, installed programs), with **Browse...** (a
+   program or a shortcut), or with **Pick window** (click its window). A program or shortcut can also be dropped
+   onto Tick's window. Tick starts it with the shortcut's arguments and *Start in* folder and records its ports
+   from the start. If the program is already running, Tick asks, then closes it (as its own close button does)
+   and starts it again. On Windows 2000 and later, *No* listens without restarting instead: port settings made
+   earlier are missed; Tick reads the current ones once.
 4. Work as usual. Press **Mark** (or type a note and press Enter) at moments that matter: "integration time
    changed to 1 s". Press **Sync** when the laptop's LibreTap does too, or film Tick's clock with LibreTap's camera.
 5. Press **Stop**, close Tick, take the stick to the laptop and add the session folder in LibreTap.
@@ -42,32 +44,43 @@ at all), so it watches the screen and records marks and syncs, but does not list
 The big clock is the PC's own clock (HH:MM:SS.tenths, local time); every recorded time uses exactly that clock,
 so a camera photo of Tick's window ties the PC's time to the laptop's.
 
-Options (Advanced... or `Tick.ini` next to `Tick.exe`, section `[tick]`): `interval_ms` (500), `full_every` (60),
+Settings (*Settings...* or `Tick.ini` next to `Tick.exe`, section `[tick]`): `interval_ms` (500), `full_every` (60),
 `tile` (32), `cursor` (1), `window_titles` (1), `hide_tick_window` (1), `on_top` (1), `copy_settings` (1),
 `program_windows_only` (0), `sessions_folder` (empty).
 
-By default the whole screen is recorded. *Advanced... > Screenshots show only the vendor program's windows* keeps
+By default the whole screen is recorded. *Settings... > Screenshots show only the vendor program's windows* keeps
 only the visible windows (including dialogs and pop-ups) of the program Tick started or listens to and paints the
 rest black, e.g. when other things on the screen must not be recorded. When Tick is not listening to a program,
-*Pick the program's window...* then asks you to click on the program's window. Windows of other programs that lie
-on top of the vendor program's window are still visible inside its area. Command line: `Tick.exe /start` starts recording at once; `Tick.exe /run
-C:\path\VENDOR.EXE [arguments]` starts recording and the program (handy in a shortcut).
+*Pick window* then asks you to click on the program's window. Windows of other programs that lie on top of the
+vendor program's window are still visible inside its area.
+
+For scripts: `Tick.exe /start` starts recording at once; `Tick.exe /run C:\path\VENDOR.EXE [arguments]` starts
+recording and the program; `Tick.exe C:\path\Vendor.lnk` (or a program; also what Explorer passes when a file is
+dropped onto Tick.exe's icon) does the same as choosing it in *Start a program...*.
 
 The session format is described in [../docs/FORMAT.md](../docs/FORMAT.md).
 
 ## Linux
 
 `build/linux/tick` (about 1 MB, one static x86-64 binary, no root, nothing to install) does the same on Linux
-PCs (and lets LibreTap be tested end to end on a Linux desktop):
+PCs (and lets LibreTap be tested end to end on a Linux desktop). Started from a file manager or desktop it opens
+a window like Tick for Windows: Start/Stop, Mark (+ note), Sync, *Start a program...* (applications menu,
+programs running now that use a serial port, USB device or network connection, Browse, Pick window) and
+*Settings*. Started in a terminal it shows a terminal clock: `s` start/stop, `m` mark (+ note, Enter), `y` sync,
+`p` start a program (list; `w` pick window), `o` settings, `q` quit. Settings are saved in `tick.ini` next to
+`tick` if that folder is writable, else `~/.config/tick/tick.ini`. A running program is restarted only after
+asking: Tick closes it (SIGTERM, as a desktop's close does; never killed) and starts the same command in the same
+folder with the same environment. Linux cannot listen to a program without restarting it.
+
+For scripts and agents:
 
 ```
-tick                                   # terminal UI: big clock; keys s = start/stop, m = mark (+note, Enter), y = sync, q = quit
-tick run [options] -- PROGRAM [ARGS]   # recommended for the serial port: record and start PROGRAM with the listener
-tick ctl status|start|stop|mark NOTE|sync|quit   # control a running tick (for scripts and AI agents; JSON answers)
-options: --dir DIR  --interval MS  --full-every N  --no-screen  --no-titles  --start  --no-tui  --until-exit  --control PATH
+tick run [options] -- PROGRAM [ARGS]   # record and start PROGRAM listening; PROGRAM may be a .desktop file or menu name
+tick ctl status|start|stop|mark NOTE|sync|quit|programs|open NAME|yes|no   # control a running tick (JSON answers)
+options: --gui  --dir DIR  --interval MS  --full-every N  --no-screen  --no-titles  --start  --no-tui  --until-exit  --control PATH
 ```
 
-![Tick for Linux in an xterm](docs/tick-linux.png)
+![Tick for Linux, window](docs/tick-linux-window.png) ![Tick for Linux in an xterm](docs/tick-linux.png)
 
 - Screen: spoken X11 protocol directly over the display's socket (GetImage of the root window; no libX11
   needed), so it works under Xorg, Xvfb and for X programs on XWayland. On a Wayland-only desktop it says that
@@ -150,11 +163,13 @@ and python3 for the native tests.
 make              # build/Tick.exe (TickHook.dll, TickHook64.dll, TickHelper64.exe inside) and build/TickEyes.exe
 make check        # import allow-list check (tools/check-imports.sh) + native unit tests
 make linux        # build/linux/tick (static) with libtickhook.so inside
-make tools-test   # test helpers for Wine runs: tickctl.exe, fakevendor.exe, fakevendor64.exe
+make tools-test   # test helpers for Wine runs: tickctl.exe, fakevendor.exe, fakewinvendor.exe, mklink.exe, ...
 WINE=/path/to/wine tests/wine-test.sh win2k /tmp/tickwine     # end-to-end under Wine + Xvfb
 WINE=/path/to/wine tests/wine-safety.sh win2k /tmp/tickwine   # worst cases (kill Tick, kill program, ...)
 WINE=/path/to/wine tests/wine-test64.sh win7 /tmp/tickwine    # 64-bit program, TickEyes, program-only capture
 WINE=/path/to/wine tests/wine-test-netusb.sh win7 /tmp/tickwine  # network + device listener, 32 and 64 bit
+WINE=/path/to/wine tests/wine-test-programs.sh win7 /tmp/tickwine  # Start a program: list, shortcut, restart, Pick window
+tests/linux-test-programs.sh /tmp/ticklinux                     # the same for Linux (window and terminal)
 make test-usb     # USB decoding without hardware (native)
 ```
 
@@ -163,6 +178,18 @@ TickEyes.exe or TickHook.dll imports a function that is not in
 `tools/win95-imports.txt` (functions present in both Windows 95 and 2000) or if the PE version is above 4.0.
 
 ## Tested and untested
+
+Tested (2026-11-27), choosing the program (Tick 0.5): shortcut reading on hand-made Windows 95, XP..11, network
+and %ProgramFiles% shortcuts, every truncation and every flipped byte (`make test`, address sanitizer), and on
+shortcuts written by Wine's own IShellLink; under Wine (Windows XP and 7 mode, Xvfb) with a windowed test program on
+COM1: the list (Start menu shortcut, installed-software entry merged with it, uninstaller left out), start from
+the shortcut (its arguments and Start-in folder arrived), restart of the running program (closed with WM_CLOSE,
+started again from its shortcut), Pick window by clicking + listening without restarting, a shortcut given on the
+command line. Linux natively under Xvfb: `tick run` with a menu name (Exec and Path), the window (list by
+keyboard, restart after the Yes button, Pick window on an xterm), the terminal's `p` and `o` screens and
+`tick.ini`; `.desktop` parsing (`make test`). **Not tested**: dropping a file onto the window (WM_DROPFILES; only
+the command-line path), Browse (the file dialogs), the Windows list on Windows 95/98 or with real installed
+software, a Linux desktop with a window manager (Xvfb has none, so the window-manager program list was empty).
 
 Tested (2026-11-26), network and USB (Tick 0.4): under Wine (Windows 7 mode) 32- and 64-bit test programs talking
 TCP and UDP to a fake network instrument on 127.0.0.1 (connect, send, recv, WSASend, overlapped WSARecv, sendto,

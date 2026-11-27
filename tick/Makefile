@@ -28,7 +28,7 @@ LDFLAGS := -nostdlib -mwindows -Wl,-e,_TickMain@0 $(OSVER) -Wl,--disable-dynamic
 LIBS := -lkernel32 -luser32 -lgdi32 -lcomdlg32
 DLLFLAGS := -shared -nostdlib -Wl,-e,_DllMain@12 -Wl,--kill-at $(OSVER) -s
 
-SRC := src/tick.c src/capture.c src/session.c src/plat_win.c src/clock.c src/launch.c src/recev.c src/png.c src/diff.c src/ring.c src/rt.c
+SRC := src/tick.c src/capture.c src/session.c src/plat_win.c src/clock.c src/launch.c src/programs.c src/lnk.c src/recev.c src/png.c src/diff.c src/ring.c src/rt.c
 OBJ := $(SRC:src/%.c=$(B)/%.o) $(B)/tick.res.o $(B)/hook.res.o
 SOBJ := $(SRC:src/%.c=$(B)/screen/%.o) $(B)/screen/tick.res.o
 CFLAGS64 := -O2 -ffreestanding -fno-builtin -fno-stack-protector -mno-stack-arg-probe \
@@ -80,6 +80,8 @@ check: $(B)/Tick.exe test
 	OBJDUMP=$(OBJDUMP) sh tools/check-imports.sh $(B)/Tick.exe $(B)/TickEyes.exe $(B)/TickHook.dll
 
 test: | $(B)
+	gcc -O1 -g -Wall -Wextra -fsanitize=address,undefined -o $(B)/test_shortcuts tests/test_shortcuts.c src/lnk.c src/rt.c src/posix/desktop.c
+	rm -rf $(B)/shortcuts && mkdir -p $(B)/shortcuts && $(B)/test_shortcuts $(B)/shortcuts
 	gcc -O2 -Wall -Wextra -o $(B)/test_core tests/test_core.c src/rt.c src/png.c src/diff.c src/ring.c -lpthread
 	mkdir -p $(B)/testout
 	$(B)/test_core $(B)/testout
@@ -89,7 +91,14 @@ clean:
 	rm -rf $(B)
 
 # test helpers for Wine runs (use the normal mingw C runtime; not shipped)
-tools-test: $(B)/tickctl.exe $(B)/fakevendor.exe $(B)/fakevendor64.exe $(B)/fakedevices.exe $(B)/fakedevices64.exe
+tools-test: $(B)/tickctl.exe $(B)/fakevendor.exe $(B)/fakevendor64.exe $(B)/fakedevices.exe $(B)/fakedevices64.exe \
+            $(B)/fakewinvendor.exe $(B)/mklink.exe $(B)/lnkdump.exe
+$(B)/fakewinvendor.exe: tests/fakewinvendor.c | $(B)
+	$(CC) -O2 -mwindows -o $@ $<
+$(B)/mklink.exe: tests/mklink.c | $(B)
+	$(CC) -O2 -o $@ $< -lole32 -luuid
+$(B)/lnkdump.exe: tests/lnkdump.c src/lnk.c src/rt.c | $(B)
+	$(CC) -O2 -o $@ tests/lnkdump.c src/lnk.c src/rt.c
 $(B)/fakedevices.exe: tests/fakedevices.c | $(B)
 	$(CC) -O2 -o $@ $< -lws2_32
 $(B)/fakedevices64.exe: tests/fakedevices.c | $(B)
@@ -103,8 +112,9 @@ $(B)/fakevendor.exe: tests/fakevendor.c | $(B)
 
 # ---------------- Linux: build/linux/tick (static, x86-64) ----------------
 LCC ?= gcc
-LCFLAGS := -O2 -Wall -Wextra -Wno-unused-parameter -D_FILE_OFFSET_BITS=64
+LCFLAGS := -O2 -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation -D_FILE_OFFSET_BITS=64
 LSRC := src/posix/tick_linux.c src/posix/capture_x11.c src/posix/x11.c src/posix/listener_posix.c \
+        src/posix/gui_x11.c src/posix/programs_posix.c src/posix/desktop.c \
         src/posix/plat_posix.c src/posix/clock_posix.c src/session.c src/recev.c src/png.c src/diff.c src/ring.c src/rt.c
 L := $(B)/linux
 

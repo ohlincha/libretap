@@ -406,6 +406,11 @@ static int make_ring(void)
 
 int listener_run(char **argv, int quiet_output, char *err, u32 errcap)
 {
+    return listener_run_in(argv, 0, 0, quiet_output, err, errcap);
+}
+
+int listener_run_in(char **argv, const char *cwd, char **envp, int quiet_output, char *err, u32 errcap)
+{
     char so[TICK_PATH], pre[TICK_PATH * 2], logp[TICK_PATH];
     const char *old = getenv("LD_PRELOAD");
     const char *b = argv[0], *q;
@@ -427,6 +432,16 @@ int listener_run(char **argv, int quiet_output, char *err, u32 errcap)
     if (child == 0) {
         int e;
         setpgid(0, 0);                      /* the terminal's keys and hang-up stay with Tick */
+        if (envp) {                         /* the environment the program had before (restart) */
+            int k;
+            const char *op;
+            clearenv();
+            for (k = 0; envp[k]; k++) if (strncmp(envp[k], "LD_PRELOAD=", 11)) putenv(envp[k]);
+            op = 0;
+            for (k = 0; envp[k]; k++) if (!strncmp(envp[k], "LD_PRELOAD=", 11)) op = envp[k] + 11;
+            snprintf(pre, sizeof pre, "%s%s%s", so, op && *op ? ":" : "", op && *op ? op : "");
+        }
+        if (cwd && *cwd && chdir(cwd) < 0) { /* the folder is gone: start where Tick is */ }
         setenv("LD_PRELOAD", pre, 1);
         setenv("TICK_RING", ring_path, 1);
         if (quiet_output) {                 /* keep the program's text out of Tick's terminal screen */

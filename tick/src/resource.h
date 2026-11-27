@@ -3,7 +3,7 @@
 #define IDR_HOOK64      3
 #define IDR_HELPER64    4
 #define IDD_ADV         100
-#define IDD_ATTACH      101
+#define IDD_PROGRAMS    102
 
 #define IDC_INTERVAL    1001
 #define IDC_FULLEVERY   1002
@@ -14,11 +14,13 @@
 #define IDC_COPYSET     1007
 #define IDC_DIR         1008
 #define IDC_OPENDIR     1009
-#define IDC_ATTACH      1010
-#define IDC_PROCLIST    1011
 #define IDC_INFO        1012
 #define IDC_PROGONLY    1013
 #define IDC_PICKWIN     1014
 #define IDC_RECSER      1015
 #define IDC_RECNET      1016
 #define IDC_RECUSB      1017
+#define IDC_PLIST       1020
+#define IDC_PDETAIL     1021
+#define IDC_PPICK       1022
+#define IDC_PBROWSE     1023

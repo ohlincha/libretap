@@ -8,7 +8,7 @@
 #include "tick.h"
 #include "resource.h"
 #include <commdlg.h>
-#include <tlhelp32.h>
+#include <shellapi.h>
 
 #define IDC_START  101
 #define IDC_MARK   102
@@ -35,9 +35,12 @@ static DWORD rec_start_tick, flash_until, msg_until;
 static int flash_n;
 static WNDPROC note_proc;
 static DWORD pick_until;                /* "click the program's window" pending until */
+static int pick_for_program;            /* 1: the picked program is to be listened to */
 static char ini_path[MAX_PATH];
 
 #define SC(v) ((v) * S100 / 100)
+
+static void update_status_later(void);
 
 /* ---------------- settings ---------------- */
 
@@ -102,6 +105,11 @@ static void show_msg(const char *m)
     msg_until = GetTickCount() + 8000;
 }
 
+void tick_show_msg(const char *m) { show_msg(m); update_status_later(); }
+
+static void update_status(void);
+static void update_status_later(void) { if (g_hwnd) PostMessageA(g_hwnd, WM_TICK_LISTENER, 0, 0); }
+
 static void update_status(void)
 {
     sbuf b;
@@ -124,7 +132,7 @@ static void update_status(void)
         if (kb < 1024) { sb_u32(&b, kb); sb_str(&b, " kB"); }
         else { sb_u32(&b, kb / 1024); sb_putc(&b, '.'); sb_u32(&b, kb % 1024 * 10 / 1024); sb_str(&b, " MB"); }
         if (g_mark_n) { sb_str(&b, ", "); sb_u32(&b, (u32)g_mark_n); sb_str(&b, g_mark_n == 1 ? " mark" : " marks"); }
-    } else sb_str(&b, "Not recording. Press Start to record the screen.");
+    } else sb_str(&b, "Not recording.");
     GetWindowTextA(h_stat1, ln, sizeof ln);
     if (lstrcmpA(ln, b.p)) SetWindowTextA(h_stat1, b.p);
 
@@ -148,6 +156,9 @@ static void update_buttons(void)
     InvalidateRect(g_hwnd, 0, FALSE);
     update_status();
 }
+
+static int start_recording(void);
+int tick_start_recording(void) { return start_recording(); }
 
 static int start_recording(void)
 {
@@ -267,7 +278,7 @@ static void create_controls(void)
 #ifndef TICK_SCREEN_ONLY
     mk("BUTTON", "Start a program...", BS_PUSHBUTTON | WS_TABSTOP, 10, 264, 150, 26, IDC_PROG, f_text);
 #endif
-    mk("BUTTON", "Advanced...", BS_PUSHBUTTON | WS_TABSTOP, 290, 264, 100, 26, IDC_ADV, f_text);
+    mk("BUTTON", "Settings...", BS_PUSHBUTTON | WS_TABSTOP, 290, 264, 100, 26, IDC_ADV, f_text);
     SendMessageA(h_note, EM_LIMITTEXT, 250, 0);
     note_proc = (WNDPROC)SetWindowLongA(h_note, GWL_WNDPROC, (LONG)(UINT_PTR)note_wndproc);
 }
@@ -361,104 +372,58 @@ static void tick_clock(void)
 
 /* ---------------- dialogs ---------------- */
 
-#ifndef TICK_SCREEN_ONLY
-static void pick_program(void)
+
+/* "Pick window": the next other window the operator activates */
+void tick_pick_window(int for_program)
 {
-    OPENFILENAMEA ofn;
-    char file[MAX_PATH], err[300];
-    file[0] = 0;
-    if (listener_running()) {
-        MessageBoxA(g_hwnd, "Tick is already listening to a program. Close that program first.", "Tick", MB_OK | MB_ICONINFORMATION);
-        return;
-    }
-    memset(&ofn, 0, sizeof ofn);
-    ofn.lStructSize = 76;           /* OPENFILENAME_SIZE_VERSION_400: works on Windows 95..11 */
-    ofn.hwndOwner = g_hwnd;
-    ofn.lpstrFilter = "Programs (*.exe)\0*.exe\0All files\0*.*\0";
-    ofn.lpstrFile = file;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrTitle = "Start the vendor program (Tick records what it does on its ports)";
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
-    if (!GetOpenFileNameA(&ofn)) return;
-    if (!start_recording()) return;
-    if (!launch_program(file, "", err, sizeof err)) MessageBoxA(g_hwnd, err, "Tick", MB_OK | MB_ICONERROR);
+    pick_for_program = for_program;
+    pick_until = GetTickCount() + 20000;
+    show_msg("Click the program's window (20 s).");
     update_status();
 }
 
-static INT_PTR CALLBACK attach_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
+static HWND top_level(HWND w)
 {
-    typedef HANDLE (WINAPI *SNAP)(DWORD, DWORD);
-    typedef BOOL (WINAPI *P32)(HANDLE, LPPROCESSENTRY32);
-    HMODULE k = GetModuleHandleA("kernel32.dll");
-    SNAP snap = (SNAP)(void *)GetProcAddress(k, "CreateToolhelp32Snapshot");
-    P32 first = (P32)(void *)GetProcAddress(k, "Process32First");
-    P32 next = (P32)(void *)GetProcAddress(k, "Process32Next");
-    (void)l;
-    if (m == WM_INITDIALOG) {
-        HWND lb = GetDlgItem(d, IDC_PROCLIST);
-        HANDLE s = snap && first && next ? snap(TH32CS_SNAPPROCESS, 0) : INVALID_HANDLE_VALUE;
-        PROCESSENTRY32 pe;
-        if (s != INVALID_HANDLE_VALUE && s) {
-            memset(&pe, 0, sizeof pe);
-            pe.dwSize = sizeof pe;
-            if (first(s, &pe)) do {
-                if (pe.th32ProcessID != GetCurrentProcessId() && pe.th32ProcessID > 8) {
-                    sbuf b;
-                    LRESULT i;
-                    sb_init(&b, 300);
-                    sb_str(&b, pe.szExeFile);
-                    sb_str(&b, "   (");
-                    sb_u32(&b, pe.th32ProcessID);
-                    sb_putc(&b, ')');
-                    i = SendMessageA(lb, LB_ADDSTRING, 0, (LPARAM)b.p);
-                    SendMessageA(lb, LB_SETITEMDATA, (WPARAM)i, (LPARAM)pe.th32ProcessID);
-                    sb_free(&b);
-                }
-            } while (next(s, &pe));
-            CloseHandle(s);
-        }
-        return TRUE;
-    }
-    if (m == WM_COMMAND) {
-        if (LOWORD(w) == IDOK || (LOWORD(w) == IDC_PROCLIST && HIWORD(w) == LBN_DBLCLK)) {
-            HWND lb = GetDlgItem(d, IDC_PROCLIST);
-            LRESULT i = SendMessageA(lb, LB_GETCURSEL, 0, 0);
-            char name[300], err[300];
-            DWORD pid;
-            if (i == LB_ERR) return TRUE;
-            pid = (DWORD)SendMessageA(lb, LB_GETITEMDATA, (WPARAM)i, 0);
-            SendMessageA(lb, LB_GETTEXT, (WPARAM)i, (LPARAM)name);
-            { char *p = name; while (*p && !(p[0] == ' ' && p[1] == ' ')) p++; *p = 0; }
-            EndDialog(d, IDOK);
-            if (!start_recording()) return TRUE;
-            if (!attach_process(pid, name, err, sizeof err)) MessageBoxA(g_hwnd, err, "Tick", MB_OK | MB_ICONERROR);
-            return TRUE;
-        }
-        if (LOWORD(w) == IDCANCEL) { EndDialog(d, IDCANCEL); return TRUE; }
-    }
-    return FALSE;
+    HWND p;
+    while (w && (p = GetParent(w)) != 0) w = p;
+    return w;
 }
 
-#endif
-
-/* "Pick the program's window": the next other window the operator activates */
 static void check_pick(void)
 {
+    static int was_down;
     HWND fg;
     DWORD pid = 0;
     char title[200];
     sbuf b;
-    if (!pick_until) return;
+    int down;
+    if (!pick_until) { was_down = 0; return; }
     if (GetTickCount() > pick_until) {
         pick_until = 0;
         show_msg("No window picked.");
         return;
     }
-    fg = GetForegroundWindow();
+    /* a click on a window (also one that does not become active), or a window becoming active */
+    down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    fg = 0;
+    if (down && !was_down) {
+        POINT pt;
+        GetCursorPos(&pt);
+        fg = top_level(WindowFromPoint(pt));
+    }
+    was_down = down;
+    if (!fg) fg = GetForegroundWindow();
     if (!fg || fg == g_hwnd || GetParent(fg) == g_hwnd) return;
     GetWindowThreadProcessId(fg, &pid);
     if (!pid || pid == GetCurrentProcessId()) return;
     pick_until = 0;
+    if (pick_for_program) {
+        SetForegroundWindow(g_hwnd);
+#ifndef TICK_SCREEN_ONLY
+        programs_picked(pid);
+#endif
+        return;
+    }
     g_pick_pid = pid;
     title[0] = 0;
     GetWindowTextA(fg, title, sizeof title);
@@ -488,18 +453,16 @@ static INT_PTR CALLBACK adv_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
         CheckDlgButton(d, IDC_RECSER, g_cfg.rec_serial ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(d, IDC_RECNET, g_cfg.rec_net ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(d, IDC_RECUSB, g_cfg.rec_usb ? BST_CHECKED : BST_UNCHECKED);
-        if (g_win9x) EnableWindow(GetDlgItem(d, IDC_ATTACH), FALSE);
 #else
         ShowWindow(GetDlgItem(d, IDC_RECSER), SW_HIDE);
         ShowWindow(GetDlgItem(d, IDC_RECNET), SW_HIDE);
         ShowWindow(GetDlgItem(d, IDC_RECUSB), SW_HIDE);
         ShowWindow(GetDlgItem(d, IDC_COPYSET), SW_HIDE);
-        ShowWindow(GetDlgItem(d, IDC_ATTACH), SW_HIDE);
 #endif
         sb_init(&b, 300);
-        sb_str(&b, TICK_NAME " - part of LibreTap. Options are saved in ");
+        sb_str(&b, TICK_NAME ", part of LibreTap. Saved in ");
         sb_str(&b, ini_path);
-        sb_str(&b, " (if that folder is writable). Changes to the screenshot options apply to the next recording.");
+        sb_str(&b, ". Screenshot settings apply from the next recording.");
         SetDlgItemTextA(d, IDC_INFO, b.p);
         sb_free(&b);
         return TRUE;
@@ -549,20 +512,8 @@ static INT_PTR CALLBACK adv_dlg(HWND d, UINT m, WPARAM w, LPARAM l)
         case IDC_PICKWIN:
             g_cfg.program_only = 1;
             EndDialog(d, IDCANCEL);
-            pick_until = GetTickCount() + 15000;
-            show_msg("Now click on the vendor program's window (15 s)...");
-            update_status();
+            tick_pick_window(0);
             return TRUE;
-#ifndef TICK_SCREEN_ONLY
-        case IDC_ATTACH:
-            if (listener_running()) {
-                MessageBoxA(d, "Tick is already listening to a program.", "Tick", MB_OK | MB_ICONINFORMATION);
-                return TRUE;
-            }
-            EndDialog(d, IDCANCEL);
-            DialogBoxParamA(hinst, MAKEINTRESOURCEA(IDD_ATTACH), g_hwnd, attach_dlg, 0);
-            return TRUE;
-#endif
         }
     }
     return FALSE;
@@ -595,13 +546,16 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_CREATE:
         g_hwnd = h;
         create_controls();
+#ifndef TICK_SCREEN_ONLY
+        programs_accept_drops(h);
+#endif
         SetTimer(h, 1, 50, 0);
         SetTimer(h, 2, 1000, 0);
         tick_clock();
         update_buttons();
         return 0;
     case WM_TIMER:
-        if (w == 1) { tick_clock(); check_pick(); }
+        if (w == 1) { tick_clock(); check_pick(); programs_timer(); }
         else { update_status(); session_flush_if_due(); }
         return 0;
     case WM_PAINT: {
@@ -626,7 +580,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         case IDC_MARK: do_mark(); SetFocus(h_note); return 0;
         case IDC_SYNC: do_sync(); SetFocus(h_note); return 0;
 #ifndef TICK_SCREEN_ONLY
-        case IDC_PROG: pick_program(); return 0;
+        case IDC_PROG: programs_dialog(hinst); update_status(); return 0;
 #endif
         case IDC_ADV: DialogBoxParamA(hinst, MAKEINTRESOURCEA(IDD_ADV), h, adv_dlg, 0); update_status(); return 0;
         }
@@ -634,6 +588,12 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_TICK_LISTENER:
         update_status();
         return 0;
+#ifndef TICK_SCREEN_ONLY
+    case WM_DROPFILES:
+        programs_drop((HANDLE)w);
+        update_status();
+        return 0;
+#endif
     case WM_TICK_ERROR:
         show_msg((const char *)l);
         update_status();
@@ -684,9 +644,13 @@ static void handle_cmdline(void)
 #ifndef TICK_SCREEN_ONLY
         else if (!lstrcmpiA(a, "/run") || !lstrcmpiA(a, "-run")) {
             p = skip_arg(p, a, sizeof a);
-            if (a[0] && start_recording() && !launch_program(a, p, err, sizeof err))
+            if (a[0] && start_recording() && !launch_program(a, p, 0, err, sizeof err))
                 MessageBoxA(g_hwnd, err, "Tick", MB_OK | MB_ICONERROR);
             break;                  /* the rest are the program's arguments */
+        }
+        else if (a[0] && a[0] != '/' && a[0] != '-') {   /* a file dropped onto Tick.exe's icon */
+            programs_open_file(a);
+            break;
         }
 #endif
     }

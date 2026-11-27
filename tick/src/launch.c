@@ -15,8 +15,8 @@
 #include "tick.h"
 #ifdef TICK_SCREEN_ONLY
 /* TickEyes.exe: screen recording only, no listener inside at all */
-int launch_program(const char *exe, const char *args, char *err, u32 errcap)
-{ (void)exe; (void)args; copy_str(err, "TickEyes records the screen only.", errcap); return 0; }
+int launch_program(const char *exe, const char *args, const char *workdir, char *err, u32 errcap)
+{ (void)exe; (void)args; (void)workdir; copy_str(err, "TickEyes records the screen only.", errcap); return 0; }
 int attach_process(DWORD pid, const char *name, char *err, u32 errcap)
 { (void)pid; (void)name; copy_str(err, "TickEyes records the screen only.", errcap); return 0; }
 int listener_running(void) { return 0; }
@@ -636,7 +636,7 @@ static u32 exe_machine(const char *exe)
     return h[off + 4] | (u32)h[off + 5] << 8;
 }
 
-int launch_program(const char *exe, const char *args, char *err, u32 errcap)
+int launch_program(const char *exe, const char *args, const char *workdir, char *err, u32 errcap)
 {
     char dll[MAX_PATH], dir[MAX_PATH];
     sbuf cmd;
@@ -669,10 +669,13 @@ int launch_program(const char *exe, const char *args, char *err, u32 errcap)
         copy_str(err, "Could not write TickHook.dll into the session folder.", errcap);
         return 0;
     }
-    copy_str(dir, exe, MAX_PATH);
-    for (k = lstrlenA(dir); k > 0 && dir[k - 1] != '\\'; k--) ;
-    dir[k > 0 ? k - 1 : 0] = 0;
-    if (k == 3) { dir[2] = '\\'; dir[3] = 0; }      /* "C:\" */
+    if (workdir && *workdir) copy_str(dir, workdir, MAX_PATH);     /* the shortcut's "Start in" */
+    else {
+        copy_str(dir, exe, MAX_PATH);
+        for (k = lstrlenA(dir); k > 0 && dir[k - 1] != '\\'; k--) ;
+        dir[k > 0 ? k - 1 : 0] = 0;
+        if (k == 3) { dir[2] = '\\'; dir[3] = 0; }  /* "C:\" */
+    }
     sb_init(&cmd, 512);
     sb_putc(&cmd, '"');
     sb_str(&cmd, exe);

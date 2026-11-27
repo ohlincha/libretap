@@ -2,7 +2,7 @@
 
 Short answer: **recording the screen is very low risk**; **listening to the vendor program** ("Start a program...")
 puts a small piece of Tick inside that program, which is a real (small) risk. This page says exactly what Tick
-does, what can go wrong and what you do then. It describes Tick 0.2.0. Everything marked *tested* was tested
+does, what can go wrong and what you do then. It describes Tick 0.5.0. Everything marked *tested* was tested
 under Wine (a Windows compatibility layer on Linux) set to behave like Windows 2000/XP/7, with a test program and a
 pretend instrument; **Tick has not yet run on a real Windows PC or next to a real instrument.**
 
@@ -11,12 +11,15 @@ pretend instrument; **Tick has not yet run on a real Windows PC or next to a rea
 - **Tick.exe is the normal choice.** If IT rules or the antivirus do not accept a program that loads a DLL into
   another program, use **TickEyes.exe** instead: the same program without the listener (no DLL inside, no
   "Start a program...", no attaching). It only takes screenshots and notes marks and syncs, which is very low risk.
-- **To record the serial port, use "Start a program...".** Tick then starts the vendor program itself and records
-  the port being opened and all its settings from the start. Nothing of Tick is ever placed inside a program that
-  was already running.
-- *Advanced... > Listen to a running program* is only for a program that is in the middle of a measurement and
-  cannot be restarted. It places the listener inside a program that is already working, and it misses the
-  settings made before attaching (Tick reads the current ones back once). Not tested yet.
+- **To record the ports, use "Start a program...".** Tick starts the vendor program itself (from its shortcut,
+  with the shortcut's arguments and folder) and records the ports from the start.
+- **If the program is already running**, Tick asks first, then closes it the way its own close button does (it
+  never forces it to end) and starts it again. Save your work in it before answering Yes. If it does not close
+  (e.g. it asks a question), Tick waits; close it yourself. Tick only ever offers to restart the program you
+  chose; it does not match programs that run other programs (cmd.exe, java, python, sh).
+- *No* (Windows 2000 and later) listens without restarting: the listener goes into a program that is already
+  working, and settings made earlier are missed (Tick reads the current ones once). Use it only when the program
+  cannot be closed.
 
 ## What Tick changes on the PC
 
@@ -24,7 +27,8 @@ pretend instrument; **Tick has not yet run on a real Windows PC or next to a rea
   written by Tick.
 - Tick writes only into **its session folder**: `TickSessions\` next to `Tick.exe` (if that is not writable:
   `Documents\TickSessions`, and as a last resort the TEMP folder; the window always shows which). Plus one file,
-  `Tick.ini` next to `Tick.exe`, and only when you press OK in *Advanced...*.
+  `Tick.ini` next to `Tick.exe`, and only when you press OK in *Settings...*. Tick reads (never changes) the Start
+menu, the Desktop and the list of installed programs to show *Start a program...*.
 - With *Start a program...*, Tick also writes `TickHook.dll` (its listener) into the session folder's `tick\`
   folder and loads it into the vendor program **while that program runs**. For a 64-bit vendor program (64-bit
   Windows only) it writes `TickHook64.dll` and a small `TickHelper64.exe` there instead; the helper runs for a
@@ -37,9 +41,9 @@ pretend instrument; **Tick has not yet run on a real Windows PC or next to a rea
 That is all.
 
 **What is in the pictures:** by default the whole screen (except Tick's own window, painted grey). If other things
-on the screen must not be recorded, *Advanced... > Screenshots show only the vendor program's windows* paints
+on the screen must not be recorded, *Settings... > Screenshots show only the vendor program's windows* paints
 everything except that program's windows black (anything lying on top of the program's window is still seen).
-Window titles of the active window are recorded too (switch off in Advanced). Typed text is never recorded as
+Window titles of the active window are recorded too (switch off in Settings). Typed text is never recorded as
 keystrokes, but whatever is visible on the screen is in the pictures.
 
 ## What can go wrong, and what to do
@@ -88,12 +92,12 @@ off on a PC that is on a network. Ask whoever looks after the PC to allow `Tick.
 antivirus product.
 
 **The PC is very old and slow.** Screenshots run at low priority so the vendor program comes first. If the PC feels
-slower anyway, open *Advanced...* and take a screenshot every 1000 or 2000 ms instead of 500; or press Stop. The
+slower anyway, open *Settings...* and take a screenshot every 1000 or 2000 ms instead of 500; or press Stop. The
 listener adds only a memory copy to each serial call (not measured on an old PC). *Not tested* on a really old PC (Pentium II class).
 
 ## Network and USB
 
-When Tick listens to a program it also records the program's network connections and USB devices (Advanced can
+When Tick listens to a program it also records the program's network connections and USB devices (Settings can
 leave either out). Tick still only watches: it never sends anything to the network or to a device, and it does not
 change the program's connections. The same rules as for serial ports apply (the real call first, results and
 errors unchanged, never waiting). Data the program sends over the network is in the session, so do not share a
@@ -107,7 +111,8 @@ then your home folder, then `/tmp`) holds what Tick writes. Two small exceptions
 the shared buffer lives in `/dev/shm/tick-ring-*` (1 MB; removed when Tick ends, or by the next Tick if Tick was
 killed), and `libtickhook.so` goes to `$XDG_RUNTIME_DIR` or `/tmp` if the session folder cannot hold programs. The
 listened-to program runs in its own process group: closing Tick's terminal or pressing keys in it does not stop
-the program. *Tested natively under Xvfb:* kill -9 of Tick while listening (the program finished all 20 exchanges),
+the program. Restarting a running program (after asking) sends it SIGTERM, as closing it on the desktop does;
+never SIGKILL, and only programs of your own user. *Tested natively under Xvfb:* kill -9 of Tick while listening (the program finished all 20 exchanges),
 kill -9 of the program (Tick noted "ended (signal 9)" and kept recording), session folder deleted while recording
 and listening (Tick kept running, the program finished normally), quitting Tick while the program runs (the
 program went on). Not tested on a real old Linux instrument PC.
@@ -118,16 +123,15 @@ program went on). Not tested on a real old Linux instrument PC.
    any data folder to another place. Tick copies the small settings files from the program's own folder into the
    session automatically when you use *Start a program...*, but not settings kept elsewhere (other folders, the
    registry) - so make your own backup too.
-2. **Look at the vendor program's icon first** (right-click > Properties): if it starts the program with extra
-   arguments or in a different "Start in" folder, Tick's *Start a program...* does not know that. Use a shortcut to
-   `Tick.exe /run "C:\path\VENDOR.EXE" <the same arguments>` instead, or record the screen only.
+2. **Start the program from its shortcut in Tick's list** (or Browse to the shortcut): Tick then uses the
+   shortcut's arguments and "Start in" folder. Browsing to the `.exe` itself starts it without them.
 3. **Try it first on a measurement that does not matter**, ideally with the instrument idle or in a safe standby
    state: start with screen recording only, then once with *Start a program...*.
 4. **Keep the instrument's own stop and emergency controls in reach**, as always when running its software.
 5. Check there is free space on the stick (an hour of screen recording usually takes a few MB; much more if the
    screen changes all the time).
 
-## Tested and not tested (Tick 0.2.0, 2026-11-26)
+## Tested and not tested (Tick 0.2.0, 2026-11-26; restart rows Tick 0.5.0, 2026-11-27)
 
 | Case | Tested |
 |---|---|
@@ -140,7 +144,9 @@ program went on). Not tested on a real old Linux instrument PC.
 | Antivirus | no |
 | 64-bit test program started from Tick (Windows 7 mode) | yes, Wine (normal run; worst cases only with 32-bit) |
 | TickEyes.exe; "vendor program's windows only" pictures | yes, Wine |
-| Listen to a running program (attach), Pick the program's window | no |
+| Running program restarted after Yes (closed with WM_CLOSE, started from its shortcut) | yes, Wine (Windows 7 mode) |
+| Pick window (click) + listen without restarting (attach) | yes, Wine (Windows 7 mode) |
+| Linux: running program restarted after Yes (SIGTERM), Pick window | yes, Xvfb |
 | Real Windows 2000/XP/7/10/11, real vendor program, real instrument | **no** |
 | Windows 95/98 | no |
 | Slow PC (Pentium II) | no |

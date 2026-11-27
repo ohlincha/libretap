@@ -13,6 +13,8 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <poll.h>
+#include <time.h>
 
 static int rd(int fd, void *p, u32 n)
 {
@@ -151,6 +153,9 @@ int x11_open(x11 *x, char *err, u32 errcap)
         goto fail2;
     }
     x->rid = g32(s + 4);
+    x->rid_mask = g32(s + 8);
+    x->min_kc = s[26];
+    x->max_kc = s[27];
     vendor_len = g16(s + 16);
     nscreens = s[20];
     nformats = s[21];
@@ -204,15 +209,39 @@ void x11_close(x11 *x)
     x->buf = 0;
 }
 
-/* read one reply (32 bytes + extra); errors and events are skipped/returned as 0 */
+int x11_send(x11 *x, const void *req, u32 n)
+{
+    x->seq++;
+    return wr(x->fd, req, n);
+}
+
+static void queue_event(x11 *x, const u8 *e)
+{
+    if ((x->evt + 1) % X11_EVQ == x->evh) return;  /* full: drop (only a window's events are queued) */
+    memcpy(x->evq[x->evt], e, 32);
+    x->evt = (x->evt + 1) % X11_EVQ;
+}
+
+/* the reply to the last request sent; events met on the way are queued, errors of earlier
+ * requests are skipped; its own error -> 0 */
 static u8 *reply(x11 *x, u32 *extra)
 {
     u8 h[32];
     for (;;) {
         u32 n;
         if (!rd(x->fd, h, 32)) return 0;
-        if (h[0] == 0) return 0;                    /* X error */
-        if (h[0] != 1) continue;                    /* an event: not asked for, skip */
+        if (h[0] == 0) {                            /* an error */
+            if (g16(h + 2) == (x->seq & 0xffff)) return 0;
+            continue;
+        }
+        if (h[0] != 1) {                            /* an event */
+            if ((h[0] & 0x7f) == 35) {              /* GenericEvent: has more bytes */
+                u32 more = g32(h + 4) * 4;
+                u8 junk[256];
+                while (more) { u32 k = more > sizeof junk ? (u32)sizeof junk : more; if (!rd(x->fd, junk, k)) return 0; more -= k; }
+            } else queue_event(x, h);
+            continue;
+        }
         n = g32(h + 4) * 4;
         if (n + 32 > x->bufcap) {
             free(x->buf);
@@ -222,10 +251,13 @@ static u8 *reply(x11 *x, u32 *extra)
         }
         memcpy(x->buf, h, 32);
         if (n && !rd(x->fd, x->buf + 32, n)) return 0;
+        if (g16(h + 2) != (x->seq & 0xffff)) continue;     /* a reply nobody waits for */
         if (extra) *extra = n;
         return x->buf;
     }
 }
+
+u8 *x11_reply(x11 *x, u32 *extra) { return reply(x, extra); }
 
 int x11_get_image(x11 *x, u8 *bgrx)
 {
@@ -237,7 +269,7 @@ int x11_get_image(x11 *x, u8 *bgrx)
     p16(req + 8, 0); p16(req + 10, 0);
     p16(req + 12, x->w); p16(req + 14, x->h);
     p32(req + 16, 0xffffffffu);
-    if (!wr(x->fd, req, 20) || !(r = reply(x, &n))) return 0;
+    if (!x11_send(x, req, 20) || !(r = reply(x, &n))) return 0;
     rowbytes = ((x->w * x->bpp + x->pad - 1) / x->pad) * x->pad / 8;
     if (n < rowbytes * x->h) return 0;
     for (y = 0; y < x->h; y++) {
@@ -263,19 +295,22 @@ int x11_get_image(x11 *x, u8 *bgrx)
     return 1;
 }
 
-static u32 atom(x11 *x, const char *name)
+static u32 atom_req(x11 *x, const char *name, int only_if_exists)
 {
     u8 req[64], *r;
     u32 n = (u32)strlen(name), len = 2 + (n + 3) / 4;
     if (n > 40) return 0;
     memset(req, 0, sizeof req);
-    req[0] = 16; req[1] = 1;                        /* InternAtom, only if exists */
+    req[0] = 16; req[1] = (u8)only_if_exists;       /* InternAtom */
     p16(req + 2, len);
     p16(req + 4, n);
     memcpy(req + 8, name, n);
-    if (!wr(x->fd, req, len * 4) || !(r = reply(x, 0))) return 0;
+    if (!x11_send(x, req, len * 4) || !(r = reply(x, 0))) return 0;
     return g32(r + 8);
 }
+
+static u32 atom(x11 *x, const char *name) { return atom_req(x, name, 1); }
+u32 x11_atom(x11 *x, const char *name) { return atom_req(x, name, 0); }
 
 /* property value of a window (first 'max' bytes); returns length or -1 */
 static int prop(x11 *x, u32 win, u32 property, char *out, u32 max, u32 *type)
@@ -289,7 +324,7 @@ static int prop(x11 *x, u32 win, u32 property, char *out, u32 max, u32 *type)
     p32(req + 12, 0);                               /* AnyPropertyType */
     p32(req + 16, 0);
     p32(req + 20, (max + 3) / 4);
-    if (!wr(x->fd, req, 24) || !(r = reply(x, &n))) return -1;
+    if (!x11_send(x, req, 24) || !(r = reply(x, &n))) return -1;
     if (type) *type = g32(r + 8);
     len = g32(r + 16) * (r[1] / 8);
     if (len > n) len = n;
@@ -297,6 +332,8 @@ static int prop(x11 *x, u32 win, u32 property, char *out, u32 max, u32 *type)
     memcpy(out, r + 32, len);
     return (int)len;
 }
+
+int x11_prop(x11 *x, u32 win, u32 property, void *out, u32 max, u32 *type) { return prop(x, win, property, out, max, type); }
 
 int x11_active_title(x11 *x, char *out, u32 cap)
 {
@@ -326,7 +363,7 @@ int x11_window_rect(x11 *x, u32 win, int *rx, int *ry, int *rw, int *rh)
     req[0] = 14; req[1] = 0;                        /* GetGeometry */
     p16(req + 2, 2);
     p32(req + 4, win);
-    if (!wr(x->fd, req, 8) || !(r = reply(x, 0))) return 0;
+    if (!x11_send(x, req, 8) || !(r = reply(x, 0))) return 0;
     *rw = g16(r + 16) + 2 * g16(r + 20);
     *rh = g16(r + 18) + 2 * g16(r + 20);
     req[0] = 40; req[1] = 0;                        /* TranslateCoordinates to the root */
@@ -334,8 +371,158 @@ int x11_window_rect(x11 *x, u32 win, int *rx, int *ry, int *rw, int *rh)
     p32(req + 4, win);
     p32(req + 8, x->root);
     p16(req + 12, 0); p16(req + 14, 0);
-    if (!wr(x->fd, req, 16) || !(r = reply(x, 0))) return 0;
+    if (!x11_send(x, req, 16) || !(r = reply(x, 0))) return 0;
     *rx = (short)g16(r + 12);
     *ry = (short)g16(r + 14);
     return 1;
+}
+
+u32 x11_new_id(x11 *x)
+{
+    u32 m = x->rid_mask, sh = 0;
+    if (!m) m = 0x1fffff;
+    while (!(m & 1)) { m >>= 1; sh++; }
+    x->id_next++;
+    return x->rid | ((x->id_next & m) << sh);
+}
+
+/* the next event (32 bytes): queued first, then from the socket, waiting up to timeout_ms
+ * (0: do not wait); 0 when there is none */
+int x11_next_event(x11 *x, u8 *ev, int timeout_ms)
+{
+    for (;;) {
+        struct pollfd p;
+        if (x->evh != x->evt) {
+            memcpy(ev, x->evq[x->evh], 32);
+            x->evh = (x->evh + 1) % X11_EVQ;
+            return 1;
+        }
+        p.fd = x->fd; p.events = POLLIN; p.revents = 0;
+        if (poll(&p, 1, timeout_ms) <= 0) return 0;
+        if (!rd(x->fd, ev, 32)) return -1;
+        if (ev[0] == 0 || ev[0] == 1) {             /* an error or a stray reply: skip */
+            if (ev[0] == 1) {
+                u32 more = g32(ev + 4) * 4;
+                u8 junk[256];
+                while (more) { u32 k = more > sizeof junk ? (u32)sizeof junk : more; if (!rd(x->fd, junk, k)) return -1; more -= k; }
+            }
+            timeout_ms = 0;
+            continue;
+        }
+        if ((ev[0] & 0x7f) == 35) {
+            u32 more = g32(ev + 4) * 4;
+            u8 junk[256];
+            while (more) { u32 k = more > sizeof junk ? (u32)sizeof junk : more; if (!rd(x->fd, junk, k)) return -1; more -= k; }
+            continue;
+        }
+        return 1;
+    }
+}
+
+/* the window under a click: grab the pointer with a crosshair until the button is pressed */
+static u32 pick_click(x11 *x, int timeout_ms)
+{
+    u8 req[32], ev[32], *r;
+    u32 font = x11_new_id(x), cur = x11_new_id(x), child = 0;
+    u32 t0 = 0;
+    struct timespec ts;
+    const char *fn = "cursor";
+    memset(req, 0, sizeof req);
+    req[0] = 45; p16(req + 2, 3 + 2); p32(req + 4, font); p16(req + 8, 6);   /* OpenFont "cursor" */
+    memcpy(req + 12, fn, 6);
+    x11_send(x, req, 20);
+    memset(req, 0, sizeof req);
+    req[0] = 94; p16(req + 2, 8); p32(req + 4, cur); p32(req + 8, font); p32(req + 12, font);
+    p16(req + 16, 34); p16(req + 18, 35);           /* CreateGlyphCursor: crosshair */
+    p16(req + 20, 0); p16(req + 22, 0); p16(req + 24, 0); p16(req + 26, 0xffff); p16(req + 28, 0xffff); p16(req + 30, 0xffff);
+    x11_send(x, req, 32);
+    memset(req, 0, sizeof req);
+    req[0] = 26; req[1] = 0; p16(req + 2, 6); p32(req + 4, x->root);
+    p16(req + 8, 1 << 2);                           /* ButtonPress */
+    req[10] = 1; req[11] = 1;                       /* asynchronous */
+    p32(req + 12, 0); p32(req + 16, cur); p32(req + 20, 0);
+    if (!x11_send(x, req, 24) || !(r = reply(x, 0)) || r[1] != 0) return 0;   /* GrabPointer refused */
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    t0 = (u32)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+    for (;;) {
+        u32 now;
+        int k = x11_next_event(x, ev, 100);
+        if (k < 0) break;
+        if (k > 0 && (ev[0] & 0x7f) == 4) { child = g32(ev + 16); if (!child) child = g32(ev + 12); break; }
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        now = (u32)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+        if ((int)(now - t0) > timeout_ms) break;
+    }
+    memset(req, 0, sizeof req);
+    req[0] = 27; p16(req + 2, 2);                   /* UngrabPointer */
+    x11_send(x, req, 8);
+    memset(req, 0, sizeof req);
+    req[0] = 95; p16(req + 2, 2); p32(req + 4, cur);  /* FreeCursor */
+    x11_send(x, req, 8);
+    memset(req, 0, sizeof req);
+    req[0] = 46; p16(req + 2, 2); p32(req + 4, font); /* CloseFont */
+    x11_send(x, req, 8);
+    return child;
+}
+
+/* _NET_WM_PID of win or of a window inside it (window managers put programs in frames) */
+static int pid_of(x11 *x, u32 win, u32 a_pid, int depth)
+{
+    u8 req[8], *r;
+    u32 n, i, cnt, type = 0;
+    u8 v[4];
+    u32 kids[64];
+    if (prop(x, win, a_pid, (char *)v, 4, &type) == 4) return (int)g32(v);
+    if (depth > 3) return 0;
+    req[0] = 15; req[1] = 0; p16(req + 2, 2); p32(req + 4, win);   /* QueryTree */
+    if (!x11_send(x, req, 8) || !(r = reply(x, &n))) return 0;
+    cnt = g16(r + 16);
+    if (cnt > 64) cnt = 64;
+    for (i = 0; i < cnt; i++) kids[i] = g32(r + 32 + i * 4);
+    for (i = cnt; i-- > 0;) {                       /* top-most first */
+        int pid = pid_of(x, kids[i], a_pid, depth + 1);
+        if (pid) return pid;
+    }
+    return 0;
+}
+
+int x11_pick_pid(x11 *x, int timeout_ms, char *title, u32 tcap)
+{
+    u32 a_pid = x11_atom(x, "_NET_WM_PID"), w = pick_click(x, timeout_ms), t;
+    int pid;
+    if (title && tcap) title[0] = 0;
+    if (!w) return 0;
+    pid = pid_of(x, w, a_pid, 0);
+    if (pid && title && tcap) {
+        u32 an = atom(x, "_NET_WM_NAME");
+        int n = an ? prop(x, w, an, title, tcap - 1, &t) : -1;
+        if (n <= 0) n = prop(x, w, 39, title, tcap - 1, &t);
+        title[n > 0 ? n : 0] = 0;
+    }
+    return pid;
+}
+
+/* the programs' windows the window manager lists: pid and title of each (up to max) */
+int x11_client_windows(x11 *x, int *pids, char (*titles)[160], int max)
+{
+    u32 list = atom(x, "_NET_CLIENT_LIST"), a_pid = atom(x, "_NET_WM_PID"), an = atom(x, "_NET_WM_NAME"), t;
+    u8 *w;
+    int n, i, k = 0;
+    if (!list || !a_pid) return 0;
+    w = malloc(4096);
+    if (!w) return 0;
+    n = prop(x, x->root, list, (char *)w, 4096, &t);
+    for (i = 0; i + 4 <= n && k < max; i += 4) {
+        u32 win = g32(w + i);
+        u8 v[4];
+        int tl;
+        if (prop(x, win, a_pid, (char *)v, 4, &t) != 4) continue;
+        pids[k] = (int)g32(v);
+        tl = an ? prop(x, win, an, titles[k], 159, &t) : -1;
+        if (tl <= 0) tl = prop(x, win, 39, titles[k], 159, &t);
+        titles[k][tl > 0 ? tl : 0] = 0;
+        k++;
+    }
+    free(w);
+    return k;
 }

@@ -5,8 +5,8 @@ IDI_TICK ICON "tick.ico"
 
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION 0,5,0,0
+PRODUCTVERSION 0,5,0,0
 FILEOS 0x4
 FILETYPE 0x1
 BEGIN
@@ -16,12 +16,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "LibreTap"
       VALUE "FileDescription", "Tick - screen and serial recorder for LibreTap"
-      VALUE "FileVersion", "0.1.0"
+      VALUE "FileVersion", "0.5.0"
       VALUE "InternalName", "Tick"
       VALUE "LegalCopyright", "Part of LibreTap"
       VALUE "OriginalFilename", "Tick.exe"
       VALUE "ProductName", "LibreTap"
-      VALUE "ProductVersion", "0.1.0"
+      VALUE "ProductVersion", "0.5.0"
     END
   END
   BLOCK "VarFileInfo"
@@ -32,7 +32,7 @@ END
 
 IDD_ADV DIALOG 0, 0, 260, 278
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Tick - Advanced"
+CAPTION "Tick - Settings"
 FONT 8, "MS Sans Serif"
 BEGIN
   LTEXT "Take a screenshot every", -1, 8, 10, 90, 8
@@ -46,7 +46,7 @@ BEGIN
   AUTOCHECKBOX "Leave Tick's own window out of screenshots", IDC_MASK, 8, 66, 240, 10
   AUTOCHECKBOX "Keep Tick on top of other windows", IDC_TOPMOST, 8, 78, 240, 10
   AUTOCHECKBOX "Screenshots show only the vendor program's windows (rest black)", IDC_PROGONLY, 8, 90, 244, 10
-  PUSHBUTTON "Pick the program's window...", IDC_PICKWIN, 20, 102, 120, 14
+  PUSHBUTTON "Pick window", IDC_PICKWIN, 20, 102, 70, 14
   AUTOCHECKBOX "Copy the started program's settings files (*.ini, *.cfg...)", IDC_COPYSET, 8, 122, 240, 10
   LTEXT "Record what the program uses:", -1, 8, 136, 110, 8
   AUTOCHECKBOX "serial ports", IDC_RECSER, 116, 135, 50, 10
@@ -55,20 +55,22 @@ BEGIN
   LTEXT "Sessions folder (empty: TickSessions next to Tick.exe):", -1, 8, 154, 240, 8
   EDITTEXT IDC_DIR, 8, 164, 244, 12, ES_AUTOHSCROLL
   PUSHBUTTON "Open sessions folder", IDC_OPENDIR, 8, 182, 100, 14
-  PUSHBUTTON "Listen to a running program...", IDC_ATTACH, 120, 182, 132, 14
   LTEXT "", IDC_INFO, 8, 204, 244, 48
   DEFPUSHBUTTON "OK", IDOK, 146, 258, 50, 14
   PUSHBUTTON "Cancel", IDCANCEL, 202, 258, 50, 14
 END
 
 
-IDD_ATTACH DIALOG 0, 0, 220, 200
+IDD_PROGRAMS DIALOG 0, 0, 300, 206
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Listen to a running program"
+CAPTION "Start a program"
 FONT 8, "MS Sans Serif"
 BEGIN
-  LTEXT "Only for a program that is in the middle of a measurement and cannot be restarted. Better: close it and use Start a program... Settings made before attaching are missed; Tick reads the current ones back once.", -1, 8, 4, 204, 30
-  LISTBOX IDC_PROCLIST, 8, 36, 204, 138, LBS_NOTIFY | WS_VSCROLL | WS_BORDER | WS_TABSTOP
-  DEFPUSHBUTTON "Listen", IDOK, 106, 180, 50, 14
-  PUSHBUTTON "Cancel", IDCANCEL, 162, 180, 50, 14
+  LTEXT "Which program talks to the instrument? Choose it, Browse for it, or Pick its window. A program or shortcut can also be dropped onto Tick.", -1, 8, 6, 284, 18
+  LISTBOX IDC_PLIST, 8, 28, 284, 134, LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL | WS_BORDER | WS_TABSTOP
+  LTEXT "", IDC_PDETAIL, 8, 166, 284, 10, SS_NOPREFIX
+  DEFPUSHBUTTON "Start", IDOK, 8, 184, 50, 14
+  PUSHBUTTON "Browse...", IDC_PBROWSE, 64, 184, 50, 14
+  PUSHBUTTON "Pick window", IDC_PPICK, 120, 184, 56, 14
+  PUSHBUTTON "Cancel", IDCANCEL, 242, 184, 50, 14
 END
