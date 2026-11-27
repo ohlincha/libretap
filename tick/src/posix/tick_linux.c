@@ -285,8 +285,15 @@ static void start_prog(const lprog *p)
 /* 1: started or refused (message shown); 2: a question for the operator (app_question) */
 int app_choose(const lprog *p)
 {
-    int pid = p->running ? p->pid : lprog_find_running(p->exe);
+    int copies = 0, pid = p->running ? p->pid : lprog_find_running(p->exe, &copies);
     if (listener_running()) { show("Tick is already listening to a program."); return 1; }
+    if (p->running && !lprog_allowed(pid)) { show("Tick may not use that program."); return 1; }
+    if (copies > 1) {   /* which one is meant is unclear: never guess which to close */
+        char m[400];
+        snprintf(m, sizeof m, "%d copies of %s are running. Close them, then choose it again.", copies, p->name);
+        show(m);
+        return 1;
+    }
     if (!pid) { start_prog(p); return 1; }
     lprog_free_strings(pending.argv);
     lprog_free_strings(pending.envp);

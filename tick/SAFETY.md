@@ -147,6 +147,9 @@ program went on). Not tested on a real old Linux instrument PC.
 | Running program restarted after Yes (closed with WM_CLOSE, started from its shortcut) | yes, Wine (Windows 7 mode) |
 | Pick window (click) + listen without restarting (attach) | yes, Wine (Windows 7 mode) |
 | Linux: running program restarted after Yes (SIGTERM), Pick window | yes, Xvfb |
+| Several copies of the chosen program running: none restarted, a message instead | code review only |
+| Shells, consoles and launchers (sh, cmd.exe, env, nohup) never offered or restarted | partly: Xvfb (a menu entry run through sh); code review |
+| Program or shortcut dropped onto Tick's window | yes, Wine (Windows 7 mode) and Xvfb (Linux); not from a real file manager |
 | Real Windows 2000/XP/7/10/11, real vendor program, real instrument | **no** |
 | Windows 95/98 | no |
 | Slow PC (Pentium II) | no |

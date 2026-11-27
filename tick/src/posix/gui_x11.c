@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #include "tickx.h"
 #include "x11.h"
+#include "desktop.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,10 @@
 static x11 X;
 static int open_ok, closed, dirty = 1;
 static u32 win, pix, gc, font, bold, a_delete, a_protocols;
+/* drag and drop from a file manager (XDND, version 5) */
+static u32 a_xaware, a_xenter, a_xpos, a_xstatus, a_xleave, a_xdrop, a_xfinished, a_xsel, a_xcopy, a_xtypes, a_urilist, a_tickdrop;
+static u32 drop_src, drop_wait;                         /* the window dragging over us; waiting for its data */
+static int drop_ok;                                     /* it offers text/uri-list */
 static int fw = 6, fa = 10, fh = 13, bw, ba;            /* character width, ascent, line height */
 static u32 *keymap;
 static int per_kc;
@@ -581,6 +586,90 @@ static void key(u32 sym)
     }
 }
 
+static void xdnd_send(u32 to, u32 type, u32 l1, u32 l2, u32 l3, u32 l4)
+{
+    u8 r[44];
+    memset(r, 0, sizeof r);
+    r[0] = 25; p16(r + 2, 11); p32(r + 4, to);         /* SendEvent, no event mask */
+    r[12] = 33; r[13] = 32;                              /* ClientMessage, format 32 */
+    p32(r + 16, to); p32(r + 20, type);
+    p32(r + 24, win); p32(r + 28, l1); p32(r + 32, l2); p32(r + 36, l3); p32(r + 40, l4);
+    x11_send(&X, r, 44);
+}
+
+/* a dropped file: a menu entry (.desktop) or a program file, else a plain refusal */
+static void drop_open(const char *path)
+{
+    struct stat st;
+    size_t l = strlen(path);
+    const char *b = strrchr(path, '/');
+    char m[400];
+    page = P_MAIN;
+    dirty = 1;
+    if (stat(path, &st) == 0 && S_ISREG(st.st_mode) &&
+        ((l > 8 && !strcmp(path + l - 8, ".desktop")) || access(path, X_OK) == 0)) {
+        app_open(path);
+        return;
+    }
+    snprintf(m, sizeof m, "Not a program or shortcut: %s", b ? b + 1 : path);
+    app_show(m);
+}
+
+static void xdnd_message(const u8 *ev)
+{
+    u32 type = g32(ev + 8), l0 = g32(ev + 12), l1 = g32(ev + 16), l2 = g32(ev + 20);
+    if (!a_xenter) return;
+    if (type == a_xenter) {
+        u32 t[64], n = 0, i, ptype = 0;
+        drop_src = l0;
+        drop_ok = 0;
+        if (l1 & 1) {                                    /* more than three types: in XdndTypeList */
+            int k = x11_prop(&X, drop_src, a_xtypes, t, sizeof t, &ptype);
+            n = k > 0 ? (u32)k / 4 : 0;
+        } else {
+            t[0] = l2; t[1] = g32(ev + 24); t[2] = g32(ev + 28);
+            n = 3;
+        }
+        for (i = 0; i < n; i++) if (t[i] == a_urilist) drop_ok = 1;
+    } else if (type == a_xpos) {
+        if (l0 != drop_src) return;
+        xdnd_send(drop_src, a_xstatus, drop_ok ? 1 : 0, 0, 0, drop_ok ? a_xcopy : 0);
+    } else if (type == a_xleave) {
+        if (l0 == drop_src) drop_src = 0;
+    } else if (type == a_xdrop) {
+        u8 r[24];
+        if (l0 != drop_src) return;
+        if (!drop_ok) { xdnd_send(drop_src, a_xfinished, 0, 0, 0, 0); drop_src = 0; return; }
+        memset(r, 0, sizeof r);
+        r[0] = 24; p16(r + 2, 6); p32(r + 4, win);      /* ConvertSelection: ask for the dropped files */
+        p32(r + 8, a_xsel); p32(r + 12, a_urilist); p32(r + 16, a_tickdrop); p32(r + 20, l2);
+        x11_send(&X, r, 24);
+        drop_wait = drop_src;
+    }
+}
+
+static void xdnd_data(const u8 *ev)
+{
+    char *buf;
+    char path[TICK_PATH];
+    u32 type = 0, src = drop_wait;
+    int n, ok = 0;
+    drop_wait = drop_src = 0;
+    if (!src) return;
+    buf = malloc(65536);
+    if (buf && g32(ev + 20) == a_tickdrop) {             /* property set: the data arrived */
+        n = x11_prop(&X, win, a_tickdrop, buf, 65535, &type);
+        if (n > 0) {
+            buf[n] = 0;
+            ok = uri_list_first_path(buf, path, sizeof path);
+        }
+    }
+    free(buf);
+    xdnd_send(src, a_xfinished, ok ? 1 : 0, ok ? a_xcopy : 0, 0, 0);
+    if (ok) drop_open(path);
+    else app_show("Drop a program or its shortcut from a file manager.");
+}
+
 void gui_events(void)
 {
     u8 ev[32];
@@ -620,6 +709,11 @@ void gui_events(void)
                 u32 *m = malloc(n);
                 if (m) { memcpy(m, q + 32, n); free(keymap); keymap = m; per_kc = q[1]; }
             }
+        } else if (type == 31) {                         /* SelectionNotify: dropped files */
+            xdnd_data(ev);
+        } else if (type == 33 && g32(ev + 8) != a_protocols) {
+            xdnd_message(ev);                            /* drag and drop */
+            dirty = 1;
         } else if (type == 33) {                         /* ClientMessage: the window's close button */
             if (g32(ev + 8) == a_protocols && g32(ev + 12) == a_delete) {
                 if (session_active() || listener_running()) { asking_close = 1; page = P_MAIN; dirty = 1; }
@@ -707,6 +801,22 @@ int gui_open(char *err, u32 errcap)
         a_protocols = x11_atom(&X, "WM_PROTOCOLS");
         a_delete = x11_atom(&X, "WM_DELETE_WINDOW");
         set_prop(a_protocols, 4, 32, &a_delete, 1);                                   /* ATOM */
+        {   /* files dropped from a file manager (XDND version 5) */
+            u32 version = 5;
+            a_xaware = x11_atom(&X, "XdndAware");
+            a_xenter = x11_atom(&X, "XdndEnter");
+            a_xpos = x11_atom(&X, "XdndPosition");
+            a_xstatus = x11_atom(&X, "XdndStatus");
+            a_xleave = x11_atom(&X, "XdndLeave");
+            a_xdrop = x11_atom(&X, "XdndDrop");
+            a_xfinished = x11_atom(&X, "XdndFinished");
+            a_xsel = x11_atom(&X, "XdndSelection");
+            a_xcopy = x11_atom(&X, "XdndActionCopy");
+            a_xtypes = x11_atom(&X, "XdndTypeList");
+            a_urilist = x11_atom(&X, "text/uri-list");
+            a_tickdrop = x11_atom(&X, "TICK_DROP");
+            set_prop(a_xaware, 4, 32, &version, 1);
+        }
         memset(hints, 0, sizeof hints);
         hints[0] = 16 | 32;                              /* PMinSize | PMaxSize: a fixed size */
         hints[5] = W; hints[6] = H; hints[7] = W; hints[8] = H;

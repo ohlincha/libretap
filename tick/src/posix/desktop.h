@@ -25,5 +25,8 @@ void desktop_free_argv(char **argv);
 int desktop_find(const char *what, desktop_entry *d);
 /* all applications in the menu (not hidden), sorted by name; returns how many, *out malloc'ed */
 int desktop_list(desktop_entry **out);
+/* the first file of a text/uri-list (what a file manager drops: file:///path or
+ * file://host/path, percent-encoded) -> local path; 1 if it is a local file URI */
+int uri_list_first_path(const char *list, char *out, unsigned cap);
 
 #endif

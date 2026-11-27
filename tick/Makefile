@@ -142,6 +142,7 @@ linux-check: $(L)/tick
 	sh tools/check-linux.sh $(L)/tick $(L)/libtickhook.so
 
 linux-tools-test:
+	$(LCC) -O2 -Wall -o $(L)/xdnd_drop tests/xdnd_drop.c src/posix/x11.c src/rt.c
 	$(LCC) -O2 -o $(L)/fakevendor_linux tests/fakevendor_linux.c
 	$(LCC) -O2 -o $(L)/fakedevices_linux tests/fakedevices_linux.c
 

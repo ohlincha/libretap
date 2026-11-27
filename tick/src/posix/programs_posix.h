@@ -21,8 +21,9 @@ void lprogs_free(lprog *l, int n);
 int lprogs_app_for(const lprog *l, int n, const char *exe);
 int lprog_running(int pid, lprog *p);
 int lprog_resolve(const char *what, lprog *p, char *err, unsigned errcap);   /* file, .desktop, menu name */
-int lprog_find_running(const char *exe);       /* pid of a running program from that file, 0 if none */
-int lprog_close(int pid);                      /* SIGTERM */
+int lprog_find_running(const char *exe, int *copies);   /* pid of a running program from that file, 0 if none */
+int lprog_close(int pid);                      /* SIGTERM (only a process Tick may see, see lprog_allowed) */
+int lprog_allowed(int pid);                    /* 0 outside $TICK_TEST_ROOT_PID's descendants (tests) */
 int lprog_alive(int pid);
 lprog lprog_copy(const lprog *p);
 void lprog_free_strings(char **v);

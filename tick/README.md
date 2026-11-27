@@ -36,7 +36,8 @@ at all), so it watches the screen and records marks and syncs, but does not list
    onto Tick's window. Tick starts it with the shortcut's arguments and *Start in* folder and records its ports
    from the start. If the program is already running, Tick asks, then closes it (as its own close button does)
    and starts it again. On Windows 2000 and later, *No* listens without restarting instead: port settings made
-   earlier are missed; Tick reads the current ones once.
+   earlier are missed; Tick reads the current ones once. If several copies of the program are running, Tick
+   restarts none and asks you to close them first. Consoles and shells (cmd.exe, PowerShell) are never offered.
 4. Work as usual. Press **Mark** (or type a note and press Enter) at moments that matter: "integration time
    changed to 1 s". Press **Sync** when the laptop's LibreTap does too, or film Tick's clock with LibreTap's camera.
 5. Press **Stop**, close Tick, take the stick to the laptop and add the session folder in LibreTap.
@@ -187,9 +188,17 @@ the shortcut (its arguments and Start-in folder arrived), restart of the running
 started again from its shortcut), Pick window by clicking + listening without restarting, a shortcut given on the
 command line. Linux natively under Xvfb: `tick run` with a menu name (Exec and Path), the window (list by
 keyboard, restart after the Yes button, Pick window on an xterm), the terminal's `p` and `o` screens and
-`tick.ini`; `.desktop` parsing (`make test`). **Not tested**: dropping a file onto the window (WM_DROPFILES; only
-the command-line path), Browse (the file dialogs), the Windows list on Windows 95/98 or with real installed
-software, a Linux desktop with a window manager (Xvfb has none, so the window-manager program list was empty).
+`tick.ini`; `.desktop` parsing (`make test`). Dropping onto the window: Windows under Wine (a Start menu shortcut
+dropped from an X11 drag source, which Wine delivers as WM_DROPFILES: started and listening), Linux (XDND v5: a
+menu entry in a folder with spaces started; a text file refused; `file://` decoding in `make test`).
+**Not tested**: a drop from a real file manager (Explorer, Nautilus, Dolphin, Thunar), Browse (the file
+dialogs), the Windows list on Windows 95/98 or with real installed software, a Linux desktop with a window
+manager (Xvfb has none, so the window-manager program list was empty).
+
+Test isolation: tests that can close or restart programs never see the user's own programs. Linux tests set
+`TICK_TEST_ROOT_PID` (Tick then lists, matches and closes only processes started under the test script; test L
+checks that a copy outside is left alone) and run their windows in their own Xvfb; the inner scripts refuse to run
+otherwise. Wine tests run in their own Wine prefix, whose wineserver holds only the test's programs.
 
 Tested (2026-11-26), network and USB (Tick 0.4): under Wine (Windows 7 mode) 32- and 64-bit test programs talking
 TCP and UDP to a fake network instrument on 127.0.0.1 (connect, send, recv, WSASend, overlapped WSARecv, sendto,

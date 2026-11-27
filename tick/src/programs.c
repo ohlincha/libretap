@@ -77,6 +77,16 @@ static const char *base_of(const char *p)
     return b;
 }
 
+/* consoles, shells and installers: never offered as "Running" (closing them closes other work) */
+static int shell_like(const char *exe)
+{
+    static const char *g[] = {"cmd.exe", "command.com", "conhost.exe", "powershell.exe", "pwsh.exe", "rundll32.exe",
+                              "msiexec.exe", "mmc.exe", "start.exe", "wine.exe", "taskmgr.exe", 0};
+    int i;
+    for (i = 0; g[i]; i++) if (!lstrcmpiA(base_of(exe), g[i])) return 1;
+    return 0;
+}
+
 static void w2a(const u16 *w, u32 n, char *out, u32 cap)
 {
     int k = WideCharToMultiByte(CP_ACP, 0, (LPCWSTR)w, (int)n, out, (int)cap - 1, 0, 0);
@@ -353,7 +363,8 @@ static BOOL CALLBACK enum_running(HWND w, LPARAM l)
     if (!pid || pid == GetCurrentProcessId()) return TRUE;
     for (i = 0; i < nents; i++) if (ents[i].running && ents[i].pid == pid) return TRUE;
     process_path(pid, path);
-    if (!path[0] || !lstrcmpiA(base_of(path), "explorer.exe") || !lstrcmpiA(base_of(path), "progman.exe")) return TRUE;
+    if (!path[0] || !lstrcmpiA(base_of(path), "explorer.exe") || !lstrcmpiA(base_of(path), "progman.exe") || shell_like(path))
+        return TRUE;
     memset(&e, 0, sizeof e);
     e.running = 1;
     e.pid = pid;
@@ -527,6 +538,26 @@ void programs_timer(void)
     }
 }
 
+/* running copies of a program file (in ents): how many, and the first one's process */
+static int running_copies(const char *target, DWORD *pid)
+{
+    int i, n = 0;
+    *pid = 0;
+    if (generic(target)) return 0;                  /* cmd.exe /c ..., javaw -jar ...: says nothing about which program */
+    for (i = 0; i < nents; i++)
+        if (ents[i].running && same_path(ents[i].target, target)) { if (!n) *pid = ents[i].pid; n++; }
+    return n;
+}
+
+static int several_copies(int n, const char *target)
+{
+    char m[MAX_PATH + 100];
+    if (n < 2) return 0;
+    wsprintfA(m, "%d copies of %s are running. Close them, then choose it again.", n, base_of(target));
+    MessageBoxA(g_hwnd, m, "Tick", MB_OK | MB_ICONINFORMATION);
+    return 1;
+}
+
 /* a file chosen with Browse or dropped onto Tick: a program or a shortcut */
 void programs_open_file(const char *path)
 {
@@ -550,9 +581,11 @@ void programs_open_file(const char *path)
     nents = 0;
     if (!ents) ents = rt_alloc(sizeof *ents * MAX_ENTRIES);
     if (ents) EnumWindows(enum_running, 0);
-    for (i = 0; i < nents && !generic(e.target); i++)
-        if (ents[i].running && same_path(ents[i].target, e.target)) {
-            DWORD pid = ents[i].pid;
+    {
+        DWORD pid;
+        int n = running_copies(e.target, &pid);
+        if (several_copies(n, e.target)) return;
+        if (n == 1) {
             build_list();
             if (!shortcut_for(e.target) && nents < MAX_ENTRIES) {   /* restart with the dropped shortcut */
                 copy_str(e.label, "dropped", sizeof e.label);
@@ -561,6 +594,8 @@ void programs_open_file(const char *path)
             choose_running(pid, e.target);
             return;
         }
+    }
+    (void)i;
     launch_entry(&e);
 }
 
@@ -662,9 +697,14 @@ void programs_dialog(HINSTANCE hi)
         int i;
         if (e.running) { choose_running(e.pid, e.target); return; }
         if (!e.target[0]) { browse(g_hwnd, e.install_dir); return; }   /* installed, .exe unknown: its folder */
-        /* the shortcut's program is running already: restart it */
-        for (i = 0; i < nents && !generic(e.target); i++)
-            if (ents[i].running && same_path(ents[i].target, e.target)) { choose_running(ents[i].pid, e.target); return; }
+        /* the shortcut's program is running already: restart it (one copy only: never guess) */
+        {
+            DWORD pid;
+            int n = running_copies(e.target, &pid);
+            if (several_copies(n, e.target)) return;
+            if (n == 1) { choose_running(pid, e.target); return; }
+        }
+        (void)i;
         launch_entry(&e);
     } else if (action == 2) tick_pick_window(1);
     else if (action == 3) browse(g_hwnd, 0);

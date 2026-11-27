@@ -2,10 +2,12 @@
 # Tick's "Start a program" under Wine (Xvfb): the program list (Start menu shortcut made with the
 # system's IShellLink, installed-software entry, uninstaller left out), starting from the shortcut
 # (its arguments and Start-in folder), restarting a running program, Pick window + listening
-# without restarting, and a shortcut given on the command line (= dropped onto Tick.exe).
+# without restarting, a shortcut given on the command line (= dropped onto Tick.exe), and a
+# shortcut dropped onto Tick's window (XDND from a test helper; Wine turns it into WM_DROPFILES).
+# Isolation: the Wine prefix has its own wineserver, so Tick sees only this test's programs.
 #   tests/wine-test-programs.sh WINVER SCRATCH        WINVER: winxp | win7 | win10
 # Needs: make all tools-test; a Wine (WINE=..., default ~/opt/wine-11.20-amd64-wow64/bin/wine),
-# xvfb-run, xdotool, python3.  Makes its own Wine prefix in SCRATCH (wineboot) and says so if Wine fails.
+# make linux-tools-test (xdnd_drop), xvfb-run, xdotool, python3.  Makes its own Wine prefix in SCRATCH (wineboot) and says so if Wine fails.
 set -e
 here=$(cd "$(dirname "$0")/.." && pwd)
 ver=${1:-win7}
@@ -83,6 +85,21 @@ sleep 3
 
 echo "== 4: a shortcut given to Tick.exe (as when dropped onto its icon)"
 "\$W" Tick.exe "\$progs\\\\Fake Vendor\\\\Fake VendorSoft.lnk" &
+sleep 10
+ctl status
+ctl close; sleep 1; ctl answer yes || true
+sleep 2
+"\$W" cmd /c taskkill /im fakewinvendor.exe >/dev/null 2>&1 || true
+sleep 2
+
+echo "== 5: the shortcut dropped onto Tick's window (as from a file manager: XDND -> WM_DROPFILES)"
+"\$W" Tick.exe &
+sleep 6
+tw=\$(xdotool search --name "^Tick - LibreTap" | head -1)
+lnk=\$("\$W" winepath -u "\$progs\\\\Fake Vendor\\\\Fake VendorSoft.lnk" 2>/dev/null | tr -d '\r')
+echo "dropping \$(basename "\$lnk") onto window \$tw"
+eval \$(xdotool getwindowgeometry --shell "\$tw")
+"$here/build/linux/xdnd_drop" "\$tw" "\$(printf 'file://%s\\r\\n' "\$(echo "\$lnk" | sed 's/ /%20/g')")" \$((X + WIDTH / 2)) \$((Y + HEIGHT / 2)) || true
 sleep 10
 ctl status
 ctl close; sleep 1; ctl answer yes || true

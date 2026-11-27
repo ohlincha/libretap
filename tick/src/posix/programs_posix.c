@@ -16,6 +16,34 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* Tests: with TICK_TEST_ROOT_PID set, Tick sees (lists, matches, closes) only processes started
+ * under that process, so a test can never touch the user's own programs. */
+static int test_root(void)
+{
+    const char *e = getenv("TICK_TEST_ROOT_PID");
+    return e && *e ? atoi(e) : 0;
+}
+
+int lprog_allowed(int pid)
+{
+    int root = test_root(), i, cur = pid;
+    if (!root) return 1;
+    for (i = 0; i < 128 && cur > 1; i++) {
+        char path[64], st[512], *r;
+        FILE *fp;
+        if (cur == root) return 1;
+        snprintf(path, sizeof path, "/proc/%d/stat", cur);
+        fp = fopen(path, "r");
+        if (!fp) return 0;
+        st[0] = 0;
+        if (!fgets(st, sizeof st, fp)) st[0] = 0;
+        fclose(fp);
+        r = strrchr(st, ')');                       /* "pid (comm) S ppid ..." */
+        if (!r || sscanf(r + 2, "%*c %d", &cur) != 1) return 0;
+    }
+    return 0;
+}
+
 static char **dup_argv(char **v)
 {
     int n = 0, i;
@@ -270,17 +298,36 @@ static int generic(const char *exe)
     return 0;
 }
 
-int lprog_find_running(const char *exe)
+/* shells and launchers: they only start other programs (interpreters such as python are not here:
+ * a python program is listed under its script's name, and matched by Pick window only) */
+static int shell_like(const char *exe)
+{
+    static const char *g[] = {"sh", "bash", "dash", "zsh", "ksh", "csh", "tcsh", "fish", "busybox", "env", "flatpak",
+                              "flatpak-spawn", "snap", "bwrap", "xdg-open", "gio", "gtk-launch", "exo-open", "kioclient5",
+                              "pkexec", "sudo", "nohup", "setsid", "nice", "ionice", "timeout", 0};
+    const char *b = strrchr(exe, '/');
+    char base[256];
+    int i;
+    snprintf(base, sizeof base, "%s", b ? b + 1 : exe);
+    for (i = 0; g[i]; i++) {
+        size_t l = strlen(g[i]);
+        if (!strncmp(base, g[i], l) && (!base[l] || (base[l] >= '0' && base[l] <= '9') || base[l] == '.')) return 1;
+    }
+    return 0;
+}
+
+int lprog_find_running(const char *exe, int *copies)
 {
     DIR *dp;
     struct dirent *de;
-    int found = 0;
+    int found = 0, n = 0;
+    if (copies) *copies = 0;
     if (!exe[0] || generic(exe)) return 0;
     dp = opendir("/proc");
     if (!dp) return 0;
-    while ((de = readdir(dp)) && !found) {
+    while ((de = readdir(dp))) {
         char l[64], t[1024];
-        ssize_t n;
+        ssize_t k;
         int pid = atoi(de->d_name);
         if (pid <= 1 || pid == getpid()) continue;
         {
@@ -289,16 +336,19 @@ int lprog_find_running(const char *exe)
             if (stat(l, &st) < 0 || st.st_uid != getuid()) continue;   /* only this user's programs */
         }
         snprintf(l, sizeof l, "/proc/%d/exe", pid);
-        n = readlink(l, t, sizeof t - 1);
-        if (n <= 0) continue;
-        t[n] = 0;
-        if (!strcmp(t, exe)) found = pid;
+        k = readlink(l, t, sizeof t - 1);
+        if (k <= 0) continue;
+        t[k] = 0;
+        if (strcmp(t, exe) || !lprog_allowed(pid) || !lprog_alive(pid)) continue;
+        if (!found) found = pid;
+        n++;
     }
     closedir(dp);
+    if (copies) *copies = n;
     return found;
 }
 
-int lprog_close(int pid) { return kill(pid, SIGTERM) == 0; }
+int lprog_close(int pid) { return lprog_allowed(pid) && kill(pid, SIGTERM) == 0; }
 
 int lprog_alive(int pid)
 {
@@ -335,9 +385,17 @@ int lprogs_list(lprog **out, const int *win_pids, char (*win_titles)[160], int n
         int pid = atoi(de->d_name), use, w = -1;
         char what[300], path[64];
         struct stat st;
-        if (pid <= 1 || pid == getpid() || pid == getppid()) continue;
+        if (pid <= 1 || pid == getpid() || pid == getppid() || !lprog_allowed(pid)) continue;
         snprintf(path, sizeof path, "/proc/%d", pid);
         if (stat(path, &st) < 0 || st.st_uid != getuid()) continue;
+        {   /* a shell or launcher is never offered as the program (sh -c ..., env, nohup) */
+            char ex[1024];
+            ssize_t m;
+            snprintf(path, sizeof path, "/proc/%d/exe", pid);
+            m = readlink(path, ex, sizeof ex - 1);
+            ex[m > 0 ? m : 0] = 0;
+            if (m > 0 && shell_like(ex)) continue;
+        }
         {   /* web browsers and remote shells are not instrument software */
             static const char *skip[] = {"chrome", "chromium", "firefox", "firefox-esr", "thunderbird", "ssh", "sshd",
                                          "Xorg", "Xwayland", "pipewire", "pulseaudio", "systemd", "dbus-daemon", 0};

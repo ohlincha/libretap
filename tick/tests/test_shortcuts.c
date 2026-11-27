@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "../src/lnk.h"
 #include "../src/posix/desktop.h"
 
@@ -315,6 +316,26 @@ static void test_desktop(const char *scratch)
     free(all);
 }
 
+static void test_uri(void)
+{
+    char p[512], me[256], u[600];
+    CHECK(uri_list_first_path("file:///opt/Vendor%20Soft/bin/acq\r\n", p, sizeof p) && !strcmp(p, "/opt/Vendor Soft/bin/acq"));
+    CHECK(uri_list_first_path("# from the file manager\r\nfile:///a/b.desktop\r\nfile:///c\r\n", p, sizeof p) && !strcmp(p, "/a/b.desktop"));
+    CHECK(uri_list_first_path("file://localhost/usr/bin/x", p, sizeof p) && !strcmp(p, "/usr/bin/x"));
+    CHECK(uri_list_first_path("file:/usr/bin/y\n", p, sizeof p) && !strcmp(p, "/usr/bin/y"));
+    CHECK(uri_list_first_path("file:///%C3%A5%C3%A4/z", p, sizeof p) && !strcmp(p, "/\xc3\xa5\xc3\xa4/z"));   /* UTF-8 */
+    me[0] = 0; gethostname(me, sizeof me - 1); me[sizeof me - 1] = 0;
+    snprintf(u, sizeof u, "file://%s/home/x", me);
+    CHECK(uri_list_first_path(u, p, sizeof p) && !strcmp(p, "/home/x"));
+    CHECK(!uri_list_first_path("file://another-computer/home/x", p, sizeof p));
+    CHECK(!uri_list_first_path("http://example.org/x", p, sizeof p));
+    CHECK(!uri_list_first_path("file:///a%00b", p, sizeof p));
+    CHECK(!uri_list_first_path("file:///a%zzb", p, sizeof p));
+    CHECK(!uri_list_first_path("file:///a%2", p, sizeof p));
+    CHECK(!uri_list_first_path("", p, sizeof p));
+    CHECK(!uri_list_first_path("file:///a/very/long/name", p, 8));
+}
+
 int main(int argc, char **argv)
 {
     const char *scratch = argc > 1 ? argv[1] : "/tmp";
@@ -326,6 +347,7 @@ int main(int argc, char **argv)
     test_lnk_env();
     test_lnk_damaged();
     test_desktop(scratch);
+    test_uri();
     if (fails) { printf("%d shortcut test(s) FAILED\n", fails); return 1; }
     printf("shortcut tests passed\n");
     return 0;

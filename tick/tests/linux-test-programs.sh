@@ -6,9 +6,15 @@
 #     (only the test's own program file can match: shells and interpreters never do)
 #  H  Pick window: click an xterm running the vendor program -> Yes -> restarted under Tick
 #  I  terminal: p (list), Esc, o (settings) 1 + Esc -> tick.ini written
+#  K  drop onto the window: a text file (refused), a menu entry with spaces in its path (started)
+#  L  isolation: a copy of the program outside this test's process tree is never offered for restart
+# Isolation: TICK_TEST_ROOT_PID limits Tick to this script's own processes; windows in own Xvfb.
 # Needs: make linux linux-tools-test; xvfb-run, xterm, xdotool, import, python3.
 set -e
 here=$(cd "$(dirname "$0")/.." && pwd)
+# Isolation: Tick lists, matches and closes only processes started under this script (never the
+# user's own programs), and every window test runs in its own Xvfb (checked in f.sh).
+export TICK_TEST_ROOT_PID=$$
 S=${1:-/tmp/tick-linux-programs}
 [ -d "$S/bin" ] && chmod u+w "$S/bin"; rm -rf "$S"; mkdir -p "$S/apps/applications" "$S/work" "$S/cfg"
 mkdir -p "$S/bin"; cp "$here/build/linux/tick" "$S/bin/"; chmod a-w "$S/bin"   # settings then go to XDG_CONFIG_HOME
@@ -39,6 +45,8 @@ echo "working folder: $(cat "$S/work/cwd.txt")"
 for d in "$S"/E/*/; do python3 -I "$here/tests/check_session.py" "$d" >/dev/null && echo "session ok"; echo "data events: $(grep -c '"kind":"data"' "$d/events.jsonl")"; done
 
 cat > "$S/f.sh" <<'EOS'
+[ -n "$TICK_TEST_ROOT_PID" ] || { echo "refusing to run: TICK_TEST_ROOT_PID is not set" >&2; exit 1; }
+case "$XAUTHORITY" in */xvfb-run.*) ;; *) echo "refusing to run: not inside its own Xvfb (xvfb-run)" >&2; exit 1 ;; esac
 win() { xdotool search --name "Tick 0.5" | head -1; }
 geom() { eval $(xdotool getwindowgeometry --shell "$(win)"); }
 click() { geom; xdotool mousemove $((X + $1)) $((Y + $2)) click 1; }
@@ -80,6 +88,7 @@ sleep 1
 
 echo "== H: Pick window (an xterm running the vendor program)"
 xterm -T "Vendor terminal" -geometry 60x10+500+20 -e "$V" "$S/port" 200 300 &
+vt=$!
 sleep 2
 "$T" --gui --dir "$S/H" --control "$S/h.sock" > "$S/H.log" 2>&1 &
 sleep 2
@@ -99,7 +108,7 @@ sleep 6
 import -window root "$S/H-listening.png"
 "$T" ctl --control "$S/h.sock" quit > /dev/null
 sleep 1
-pkill -f "Vendor terminal" || true
+kill $vt 2>/dev/null || true       # only the xterm this test started
 
 echo "== I: terminal: p, Esc, o, 1, Esc"
 xterm -geometry 100x30+0+0 -e "$T" --dir "$S/I" --control "$S/i.sock" &
@@ -116,10 +125,40 @@ xdotool type 1; sleep 0.3
 import -window root "$S/I-settings.png"
 xdotool key Escape; sleep 0.5
 xdotool type q; sleep 1
+
+echo "== K: drop files onto the window (XDND, as a file manager does)"
+mkdir -p "$S/my apps"; cp "$S/apps/applications/fakevendor-direct.desktop" "$S/my apps/fake vendor.desktop"
+echo notes > "$S/notes.txt"
+"$T" --gui --dir "$S/K" --control "$S/k.sock" > "$S/K.log" 2>&1 &
+sleep 2
+D="$here/build/linux/xdnd_drop"
+"$D" "$(win)" "file://$S/notes.txt
+"
+"$T" ctl --control "$S/k.sock" status | python3 -c "import json,sys; print('message:', json.load(sys.stdin)['message'])"
+"$D" "$(win)" "$(printf '# dropped\r\nfile://%s\r\n' "$(echo "$S/my apps/fake vendor.desktop" | sed 's/ /%20/g')")"
+sleep 4
+"$T" ctl --control "$S/k.sock" status | cut -c1-300
+import -window root "$S/K-listening.png"
+sleep 4
+"$T" ctl --control "$S/k.sock" quit > /dev/null
+sleep 1
+
+echo "== L: isolation: the same program running outside this test is not offered for restart"
+( ( cd "$S/work" && exec "$V" "$S/port" 40 300 > /dev/null 2>&1 ) & )   # double fork: reparented, not under TICK_TEST_ROOT_PID
+sleep 0.5
+outside=$(pgrep -n -f "^$V $S/port 40 300\$" || true)
+"$T" --gui --dir "$S/L" --control "$S/l.sock" > "$S/L.log" 2>&1 &
+sleep 2
+"$T" ctl --control "$S/l.sock" open "Fake Vendor Direct" | python3 -c "import json,sys; q=json.load(sys.stdin)['question']; print('question:', q or '(none: started anew)')"
+sleep 2
+[ -n "$outside" ] && kill -0 "$outside" 2>/dev/null && echo "outside copy still running (untouched)"
+"$T" ctl --control "$S/l.sock" quit > /dev/null
+sleep 1
+[ -n "$outside" ] && kill "$outside" 2>/dev/null || true    # started by this test
 EOS
 timeout 150 xvfb-run -a -s "-screen 0 1024x768x24" sh "$S/f.sh" 2>&1 | grep -v XGetInputFocus || true
 kill $inst 2>/dev/null || true
-for x in F G H; do
+for x in F G H K; do
     for d in "$S"/$x/*/; do
         [ -d "$d" ] || continue
         python3 -I "$here/tests/check_session.py" "$d" >/dev/null && echo "$x: session ok" || echo "$x: SESSION CHECK FAILED"

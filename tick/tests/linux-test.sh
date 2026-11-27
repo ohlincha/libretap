@@ -9,6 +9,7 @@
 # Needs: build/linux/tick, build/linux/fakevendor_linux, xvfb-run, xterm, xclock, xdotool,
 # import (ImageMagick), python3.
 set -e
+export TICK_TEST_ROOT_PID=$$   # Tick sees only processes started under this script
 here=$(cd "$(dirname "$0")/.." && pwd)
 S=${1:-/tmp/tick-linux-test}
 rm -rf "$S"; mkdir -p "$S"

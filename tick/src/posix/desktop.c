@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <strings.h>
 #include <sys/stat.h>
 
@@ -231,4 +232,51 @@ int desktop_find(const char *what, desktop_entry *d)
     }
     free(l.e);
     return found;
+}
+
+static int hexv(char c)
+{
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+int uri_list_first_path(const char *list, char *out, unsigned cap)
+{
+    const char *l = list;
+    while (*l) {
+        const char *e = l + strcspn(l, "\r\n"), *u = l, *path;
+        unsigned o = 0;
+        if (*l == '#' || e == l) { l = e + strspn(e, "\r\n"); continue; }      /* comment, empty line */
+        if (strncasecmp(u, "file:", 5)) return 0;                              /* the first item is not a file */
+        u += 5;
+        if (u[0] == '/' && u[1] == '/') {                                       /* file://host/path */
+            const char *h = u + 2, *slash = h;
+            char host[256], me[256];
+            while (slash < e && *slash != '/') slash++;
+            if (slash >= e) return 0;
+            snprintf(host, sizeof host, "%.*s", (int)(slash - h), h);
+            me[0] = 0;
+            gethostname(me, sizeof me - 1);
+            me[sizeof me - 1] = 0;
+            if (host[0] && strcasecmp(host, "localhost") && strcasecmp(host, me)) return 0;   /* another computer's file */
+            path = slash;
+        } else if (u[0] == '/') {
+            path = u;                                                          /* file:/path */
+        } else {
+            return 0;
+        }
+        for (; path < e; path++) {
+            char c = *path;
+            if (c == '%') {
+                int a = path + 2 < e ? hexv(path[1]) : -1, b = a >= 0 ? hexv(path[2]) : -1;
+                if (a < 0 || b < 0 || (a == 0 && b == 0)) return 0;             /* malformed, or a NUL byte */
+                c = (char)(a * 16 + b);
+                path += 2;
+            }
+            if (o + 1 >= cap) return 0;
+            out[o++] = c;
+        }
+        out[o] = 0;
+        return o > 0;
+    }
+    return 0;
 }
