@@ -65,13 +65,13 @@ Sources: `docs/hardware/src/` (drawings and text in Python, written to HTML), bu
 Capturing network traffic needs permission, so the installers set it up (this changes system settings):
 
 - **Linux (.deb)**: installs everything it uses with it: Wireshark (the program and its dumpcap), `ffmpeg`, and
-  Qt's X11 and Wayland window plugins. Its post-install script does what
-  answering "Yes" to Wireshark's "allow non-superusers to capture packets?" does: a `wireshark` group, dumpcap
-  runnable by that group with the network-capture capabilities (`cap_net_raw,cap_net_admin`), and the user who ran
-  the installation (via sudo or pkexec) added to the group. Until that user logs in again, LibreTap starts dumpcap
-  through `sg wireshark`. Undo: `sudo dpkg-reconfigure wireshark-common` (answer No) and
-  `sudo gpasswd -d $USER wireshark`. If it could not be set up, the Connections area says so with the one command
-  that fixes it.
+  Qt's X11 and Wayland window plugins. During installation Wireshark asks *Should non-superusers be able to capture
+  packets?* (a tick-box in graphical installers, Yes/No in a terminal). Either choice works: LibreTap's
+  post-install script then allows capture anyway, for the user who installed it: a `wireshark` group, dumpcap
+  runnable by that group with the network-capture capabilities (`cap_net_raw,cap_net_admin`), and that user (via
+  sudo or pkexec) in the group. Until the next login, LibreTap starts dumpcap through `sg wireshark`. Undo:
+  `sudo dpkg-reconfigure wireshark-common` (choose No) and `sudo gpasswd -d $USER wireshark`. If capture is not
+  possible, Record offers *Set it up now* (asks for the administrator password).
 - **Windows**: Npcap (the capture driver) may not be bundled under its licence. The installer offers, checked when
   Wireshark is missing, to download Wireshark's official installer from wireshark.org, which installs dumpcap and
   offers Npcap; you click through it (it asks for administrator rights). LibreTap itself installs per user.

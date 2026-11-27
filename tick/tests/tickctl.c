@@ -1,10 +1,33 @@
 /* tickctl.exe - test helper: drives a running Tick like an operator would.
  *   tickctl start|stop|mark [note]|sync|close|advanced
  * "close" also answers Tick's "Stop recording and close Tick?" with Yes.
- * Built with the normal mingw C runtime; it is a test tool, not shipped. */
+ * No C runtime (like Tick), so it runs on Windows 95/98/2000/XP SP1 as well; a test tool, not shipped. */
 #include <windows.h>
-#include <stdio.h>
-#include <string.h>
+#include <stdarg.h>
+
+/* the few C functions used, on Win32 alone */
+static void ctl_printf(const char *fmt, ...)
+{
+    char buf[1100];
+    DWORD n;
+    va_list ap;
+    va_start(ap, fmt);
+    n = (DWORD)wvsprintfA(buf, fmt, ap);
+    va_end(ap);
+    WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, n, &n, 0);
+}
+#define printf ctl_printf
+#define strcmp lstrcmpA
+static char *ctl_strstr(const char *h, const char *n)
+{
+    int k;
+    for (; *h; h++) {
+        for (k = 0; n[k] && h[k] == n[k]; k++) {}
+        if (!n[k]) return (char *)h;
+    }
+    return 0;
+}
+#define strstr ctl_strstr
 
 #define IDC_START 101
 #define IDC_MARK  102
@@ -25,7 +48,7 @@ static HWND wait_dialog(const char *title)
     return 0;
 }
 
-int main(int argc, char **argv)
+static int ctl_main(int argc, char **argv)
 {
     HWND w = FindWindowA("TickRecorder", NULL);
     if (argc < 2) { printf("usage: tickctl start|stop|mark [note]|sync|close\n"); return 2; }
@@ -111,4 +134,27 @@ int main(int argc, char **argv)
         return 2;
     }
     return 0;
+}
+
+/* entry point: split the command line (double quotes group words), run, exit */
+void __stdcall CtlMain(void)
+{
+    static char line[2048];
+    char *argv[16], *p = line;
+    int argc = 0;
+    lstrcpynA(line, GetCommandLineA(), sizeof line);
+    while (*p && argc < 15) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        if (*p == '"') {
+            argv[argc++] = ++p;
+            while (*p && *p != '"') p++;
+        } else {
+            argv[argc++] = p;
+            while (*p && *p != ' ' && *p != '\t') p++;
+        }
+        if (*p) *p++ = 0;
+    }
+    argv[argc] = 0;
+    ExitProcess((UINT)ctl_main(argc, argv));
 }

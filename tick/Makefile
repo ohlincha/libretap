@@ -105,8 +105,8 @@ $(B)/fakedevices64.exe: tests/fakedevices.c | $(B)
 	$(CC64) -O2 -o $@ $< -lws2_32
 $(B)/fakevendor64.exe: tests/fakevendor.c | $(B)
 	$(CC64) -O2 -o $@ $<
-$(B)/tickctl.exe: tests/tickctl.c | $(B)
-	$(CC) -O2 -o $@ $<
+$(B)/tickctl.exe: tests/tickctl.c demo/rt_demo.c | $(B)
+	$(CC) $(CFLAGS) -nostdlib -mconsole -Wl,-e,_CtlMain@0 $(OSVER) -Wl,--disable-dynamicbase -s -o $@ $< demo/rt_demo.c -lkernel32 -luser32
 $(B)/fakevendor.exe: tests/fakevendor.c | $(B)
 	$(CC) -O2 -o $@ $<
 
@@ -159,7 +159,7 @@ $(B)/demo/DemoMeter.exe: demo/meter.c demo/rt_demo.c demo/demo_common.h
 $(B)/demo/DemoInstrument.exe: demo/instrument.c demo/rt_demo.c demo/demo_common.h
 	mkdir -p $(B)/demo
 	$(CC) $(DEMOFLAGS) -nostdlib -mconsole -Wl,-e,_InstrumentMain@0 $(OSVER) -Wl,--disable-dynamicbase -s -o $@ demo/instrument.c demo/rt_demo.c -lkernel32 -luser32 -lws2_32
-demo-check: demo
-	sh tools/check-demo-imports.sh $(OBJDUMP) $(B)/demo/DemoMeter.exe $(B)/demo/DemoInstrument.exe
+demo-check: demo $(B)/tickctl.exe
+	sh tools/check-demo-imports.sh $(OBJDUMP) $(B)/demo/DemoMeter.exe $(B)/demo/DemoInstrument.exe $(B)/tickctl.exe
 
 .PHONY: demo demo-check all check test clean tools-test linux linux-check test-usb linux-tools-test

@@ -12,7 +12,7 @@
 #define PSEP "/"
 #endif
 
-#define TICK_VERSION "0.5.0"
+#define TICK_VERSION "0.5.1"
 #ifdef TICK_SCREEN_ONLY
 #define TICK_NAME    "TickEyes " TICK_VERSION
 #else

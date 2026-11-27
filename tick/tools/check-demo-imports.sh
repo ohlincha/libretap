@@ -4,7 +4,7 @@
 # Usage: tools/check-demo-imports.sh OBJDUMP file.exe...
 here=$(dirname "$0"); OBJDUMP=$1; shift; status=0
 # Win32 functions since Windows 95 / NT 3.1 that Tick itself does not use (so not on its list):
-extra="kernel32.dll|GetStdHandle kernel32.dll|SetCommState kernel32.dll|SetCommTimeouts kernel32.dll|SetConsoleTitleA user32.dll|IsDialogMessageA"
+extra="kernel32.dll|GetStdHandle kernel32.dll|SetCommState kernel32.dll|SetCommTimeouts kernel32.dll|SetConsoleTitleA user32.dll|IsDialogMessageA user32.dll|FindWindowA user32.dll|IsWindow user32.dll|SendMessageW user32.dll|wvsprintfA"
 ws2="accept bind inet_addr closesocket connect htonl htons listen recv send setsockopt socket WSAStartup WSACleanup"
 for f in "$@"; do
     imports=$("$OBJDUMP" -p "$f" | awk '/DLL Name:/ {d = tolower($3)} /^ +[0-9]+ +[A-Za-z_?@]/ && d {print d, $2}')

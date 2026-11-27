@@ -9,6 +9,8 @@
  *   /tmp/demo-instrument-com      the same as a Unix socket (VirtualBox: Port Mode "Host Pipe", "Connect to
  *                                 existing pipe/socket" on, that path)
  *   a pseudo-terminal             for programs on this computer (its path is printed)
+ * and, with --vm-com HOST:PORT, connects to a VM's COM port in TCP server mode (VirtualBox: Port Mode "TCP",
+ * "Connect to existing" off, port e.g. 5027), reconnecting when the VM restarts.
  * Build: cc -O2 -o demo-instrument instrument_linux.c -lm        Stop: Ctrl-C. */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -22,6 +24,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/un.h>
+#include <arpa/inet.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -115,8 +118,34 @@ static void handle(struct conn *c)
     if (c->got >= (int)sizeof c->buf - 1) c->got = 0;
 }
 
-int main(void)
+static char vm_host[64];
+static int vm_port, vm_idx = -1;
+static double vm_next;
+
+static void vm_try(void)   /* connect to the VM's COM port (TCP server in the VM software) */
 {
+    struct sockaddr_in a;
+    int fd;
+    if (!vm_port || (vm_idx >= 0 && cs[vm_idx].fd >= 0) || now() < vm_next) return;
+    vm_next = now() + 2;
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_port = htons(vm_port);
+    inet_pton(AF_INET, vm_host, &a.sin_addr);
+    if (connect(fd, (struct sockaddr *)&a, sizeof a)) { close(fd); return; }
+    vm_idx = add(fd, 1, "VM COM port");
+}
+
+int main(int argc, char **argv)
+{
+    for (int i = 1; i + 1 < argc; i++)
+        if (!strcmp(argv[i], "--vm-com")) {
+            char *c = strrchr(argv[i + 1], ':');
+            if (!c) { fprintf(stderr, "--vm-com HOST:PORT\n"); return 2; }
+            snprintf(vm_host, sizeof vm_host, "%.*s", (int)(c - argv[i + 1]), argv[i + 1]);
+            vm_port = atoi(c + 1);
+        }
     setvbuf(stdout, 0, _IOLBF, 0);
     for (int i = 0; i < MAXC; i++) cs[i].fd = -1;
     int net = listen_tcp(NET_PORT), com = listen_tcp(COM_PORT), pipe_fd = listen_unix(COM_PATH);
@@ -132,14 +161,16 @@ int main(void)
     printf("  network:      TCP port %d (DemoMeter: Network, this computer's address; from a VirtualBox NAT VM: 10.0.2.2)\n", NET_PORT);
     printf("  serial line:  TCP port %d, Unix socket %s (a VM's COM port), pseudo-terminal %s\n", COM_PORT, COM_PATH,
            pty >= 0 ? ptsname(pty) : "(none)");
+    if (vm_port) printf("  VM COM port:  connecting to %s:%d (retrying every 2 s)\n", vm_host, vm_port);
     for (;;) {
         struct pollfd p[MAXC + 3];
+        vm_try();
         int n = 0, map[MAXC];
         p[n++] = (struct pollfd){net, POLLIN, 0};
         p[n++] = (struct pollfd){com, POLLIN, 0};
         p[n++] = (struct pollfd){pipe_fd, pipe_fd >= 0 ? POLLIN : 0, 0};
         for (int i = 0; i < MAXC; i++) if (cs[i].fd >= 0) { map[n - 3] = i; p[n++] = (struct pollfd){cs[i].fd, POLLIN, 0}; }
-        if (poll(p, n, -1) < 0) { if (errno == EINTR) continue; perror("poll"); return 1; }
+        if (poll(p, n, vm_port ? 1000 : -1) < 0) { if (errno == EINTR) continue; perror("poll"); return 1; }
         if (p[0].revents & POLLIN) add(accept(net, 0, 0), 0, "network client");
         if (p[1].revents & POLLIN) add(accept(com, 0, 0), 1, "serial line (TCP)");
         if (pipe_fd >= 0 && (p[2].revents & POLLIN)) add(accept(pipe_fd, 0, 0), 1, "serial line (Unix socket)");

@@ -1,9 +1,9 @@
 #!/bin/sh
 # LibreTap: set up network capture for a user (run as root: by the .deb's postinst, or by LibreTap through pkexec
-# when the user clicks "Set it up"). Installs Wireshark if dumpcap is missing, then does what answering "Yes" to
-# Wireshark's "Should non-superusers be able to capture packets?" does, and puts the user in the wireshark group.
+# when the user clicks "Set it up"). Installs Wireshark if dumpcap is missing, then allows what Wireshark's question
+# "Should non-superusers be able to capture packets?" allows when ticked (Yes), and puts the user in the wireshark group.
 #   setup-capture [USER]      (USER: default $SUDO_USER, or the pkexec caller)
-# Undo: sudo dpkg-reconfigure wireshark-common (answer No) and sudo gpasswd -d USER wireshark.
+# Undo: sudo dpkg-reconfigure wireshark-common (choose No) and sudo gpasswd -d USER wireshark.
 set -e
 user="${1:-${SUDO_USER:-}}"
 if [ -z "$user" ] && [ -n "${PKEXEC_UID:-}" ]; then

@@ -165,8 +165,8 @@ CaptureAccess captureAccess() {
         a.sentence = QStringLiteral("Ethernet capture ready.");
         return a;
     }
-    a.sentence = QStringLiteral("Wireshark's capture helper is for root only. Run once: sudo dpkg-reconfigure wireshark-common (answer Yes), "
-                                "then sudo usermod -aG wireshark $USER");
+    a.sentence = QStringLiteral("Capture is allowed for the administrator only. In a terminal, once: sudo dpkg-reconfigure "
+                                "wireshark-common (allow non-superusers: Yes), then sudo usermod -aG wireshark $USER");
     return a;
 #elif defined(Q_OS_MACOS)
     bool bpf = false;
