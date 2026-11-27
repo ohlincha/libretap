@@ -3,6 +3,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QDir>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -30,6 +32,43 @@ QJsonObject run(const QString& ws, const QStringList& args, int* code = nullptr)
 class TestCli : public QObject {
     Q_OBJECT
 private slots:
+    void tickBundle() {
+        QTemporaryDir ws;
+        // a pretend installed Tick, read-only like /usr/share/libretap/tick
+        const QString b = ws.filePath(QStringLiteral("bundle"));
+        QDir().mkpath(b);
+        for (const char* n : {"Tick.exe", "tick", "SAFETY.md"}) {
+            QFile f(QDir(b).filePath(QLatin1String(n)));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(n);
+            f.close();
+            f.setPermissions(QFileDevice::ReadOwner | QFileDevice::ReadGroup | QFileDevice::ReadOther |
+                             (QLatin1String(n) == QLatin1String("tick") ? QFileDevice::ExeOwner : QFileDevice::Permissions()));
+        }
+        qputenv("LIBRETAP_TICK_DIR", QFile::encodeName(b));
+        const QJsonObject info = run(ws.path(), {QStringLiteral("tick")});
+        QVERIFY(info.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(info.value(QStringLiteral("files")).toArray().size(), 3);
+        const QString stick = ws.filePath(QStringLiteral("stick"));
+        QDir().mkpath(stick);
+        for (int pass = 0; pass < 2; ++pass) {   // twice: a second copy replaces the read-only-sourced files
+            const QJsonObject c = run(ws.path(), {QStringLiteral("tick"), QStringLiteral("copy"), stick});
+            QVERIFY2(c.value(QStringLiteral("ok")).toBool(), qPrintable(c.value(QStringLiteral("error")).toString()));
+        }
+        QVERIFY(QFileInfo::exists(stick + QStringLiteral("/Tick/Tick.exe")));
+        QVERIFY(QFileInfo(stick + QStringLiteral("/Tick/Tick.exe")).isWritable());
+#ifndef Q_OS_WIN
+        QVERIFY(QFileInfo(stick + QStringLiteral("/Tick/tick")).isExecutable());
+#endif
+        // without a bundle: a clear refusal
+        qputenv("LIBRETAP_TICK_DIR", QFile::encodeName(ws.filePath(QStringLiteral("nothing"))));
+        int code = 0;
+        const QJsonObject none = run(ws.path(), {QStringLiteral("tick"), QStringLiteral("copy"), stick}, &code);
+        QCOMPARE(code, 1);
+        QVERIFY(none.value(QStringLiteral("error")).toString().contains(QStringLiteral("no Tick")));
+        qunsetenv("LIBRETAP_TICK_DIR");
+    }
+
     void controlHeadlessRecorder() {
         QTemporaryDir ws;
         QCOMPARE(run(ws.path(), {QStringLiteral("status")}).value(QStringLiteral("running")).toBool(), false);

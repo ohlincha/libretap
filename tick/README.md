@@ -25,7 +25,9 @@ records the screen, marks and syncs only.
 
 ## Use
 
-1. Copy `Tick.exe` to a USB stick (or any folder) and double-click it on the instrument PC.
+1. Copy `Tick.exe` to a USB stick (or any folder) and double-click it on the instrument PC. Get it from the
+   [releases page](https://github.com/ohlincha/libretap/releases) (`Tick-…-Windows.zip`), or from LibreTap on
+   your laptop: *Copy Tick to a USB stick…*.
 2. Press **Start**. The window shows the folder it records into: `TickSessions\` next to `Tick.exe` (if that
    folder cannot be written: `Documents\TickSessions`, then the TEMP folder).
 3. **Recommended:** press **Start a program...** and pick the vendor program's `.exe` instead of starting it from

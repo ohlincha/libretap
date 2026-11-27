@@ -24,6 +24,9 @@ instrument.
 - **Tick**: a small companion program for the old PC itself (Windows 2000 to 11, separate project) records the
   screen and the vendor program's port calls in the same format. *Add Tick session…* combines its folder with
   LibreTap's recording; the clocks are lined up automatically from the traffic both saw, or with the Sync button.
+  Tick comes inside LibreTap's installers: *Copy Tick to a USB stick…* (or `LibreTapCLI tick copy FOLDER`) puts it
+  on a stick for the old PC. It is also a separate download on the releases page (`Tick-…-Windows.zip`,
+  `tick-…-linux-x86_64.tar.gz`), for those who only need Tick.
 - **USBPcap import**: a Wireshark/USBPcap capture made on the instrument PC, only the chosen devices (keyboards
   and USB sticks stay out).
 - **Marks**: press Mark (space bar) and say what you are about to change; marks appear on the timeline.

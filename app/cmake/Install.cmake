@@ -6,6 +6,24 @@
 # camera is read directly (V4L2) and ffmpeg is a dependency of the .deb for other cameras and inputs.
 include(GNUInstallDirs)
 
+# Tick, the portable companion for the old PC, carried inside the installers so it can be copied to a USB stick
+# (File ▸ Copy Tick to a USB stick, `LibreTapCLI tick copy`). LIBRETAP_TICK_DIR: a folder with Tick's built files
+# (Tick.exe, TickScreen.exe, tick, README.md, SAFETY.md); CI fills it from the Tick job.
+set(LIBRETAP_TICK_DIR "" CACHE PATH "Folder with Tick's built files to bundle (empty: none)")
+if(LIBRETAP_TICK_DIR)
+  if(NOT EXISTS "${LIBRETAP_TICK_DIR}/Tick.exe")
+    message(FATAL_ERROR "LIBRETAP_TICK_DIR=${LIBRETAP_TICK_DIR} has no Tick.exe")
+  endif()
+  if(WIN32)
+    set(_tick_dest tick)
+  elseif(APPLE AND LIBRETAP_GUI)
+    set(_tick_dest LibreTap.app/Contents/Resources/tick)
+  else()
+    set(_tick_dest ${CMAKE_INSTALL_DATADIR}/libretap/tick)
+  endif()
+  install(DIRECTORY "${LIBRETAP_TICK_DIR}/" DESTINATION ${_tick_dest} USE_SOURCE_PERMISSIONS)
+endif()
+
 if(LIBRETAP_GUI)
   set_target_properties(libretap-gui PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER io.github.ohlincha.libretap

@@ -71,6 +71,7 @@ private:
     void findSpeed();
     void switchHelp();
     void addTickDialog();
+    void copyTickDialog();
     void reloadTimeline(double keepTime = -1);
     void showPicture();
     TapConfig tapConfig() const;

@@ -39,6 +39,7 @@
 
 #include "core/control.h"
 #include "core/match.h"
+#include "core/tickbundle.h"
 #include "core/util.h"
 #include "splash.h"
 #include "analysisviews.h"
@@ -179,6 +180,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     file->addAction(QStringLiteral("&New recording"), QKeySequence::New, this, &MainWindow::showRecordPage);
     file->addAction(openAct);
     file->addAction(QStringLiteral("Add &Tick session…"), this, &MainWindow::addTickDialog);
+    file->addAction(QStringLiteral("Copy Tick to a &USB stick…"), this, &MainWindow::copyTickDialog);
     file->addSeparator();
     help->addAction(QStringLiteral("Try the &demo (no hardware)"), this, [this] {
         setDemo(true);
@@ -1138,6 +1140,29 @@ void MainWindow::addTickDialog() {
     }
     const QString d = QFileDialog::getExistingDirectory(this, QStringLiteral("Tick's session folder (from the USB stick)"), QDir::homePath());
     if (!d.isEmpty()) addSession(d);
+}
+
+void MainWindow::copyTickDialog() {
+    const QString title = QStringLiteral("Copy Tick to a USB stick");
+    if (bundledTickDir().isEmpty()) {
+        QMessageBox::information(this, title, QStringLiteral("This LibreTap has no Tick inside. Download Tick from "
+                                                             "<a href=\"https://github.com/ohlincha/libretap/releases\">the LibreTap releases</a>."));
+        return;
+    }
+    const QString d = QFileDialog::getExistingDirectory(this, QStringLiteral("Where to put Tick (e.g. the USB stick)"), QDir::homePath());
+    if (d.isEmpty()) return;
+    QStringList copied;
+    QString err;
+    if (!copyTick(d, &copied, &err)) {
+        QMessageBox::warning(this, title, err);
+        return;
+    }
+    QMessageBox::information(this, title,
+                             QStringLiteral("<p>Tick is in <b>%1</b>.</p><p>On the old PC, nothing needs installing: open that folder and "
+                                            "run <b>Tick.exe</b> (Windows 95 to 11) or <b>tick</b> (Linux). Read <b>SAFETY.md</b> first: "
+                                            "it says what Tick does and how to get back to normal if anything goes wrong.</p>"
+                                            "<p>Afterwards, bring the stick back and use <i>Add Tick session…</i>.</p>")
+                                 .arg(QDir::toNativeSeparators(QDir(d).filePath(QStringLiteral("Tick")))));
 }
 
 void MainWindow::clocksDialog() {

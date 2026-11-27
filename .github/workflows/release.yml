@@ -18,6 +18,7 @@ defaults:
 jobs:
   deb:
     name: Linux .deb (${{ matrix.tag }})
+    needs: tick
     strategy:
       fail-fast: false
       matrix:
@@ -32,13 +33,20 @@ jobs:
         run: |
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git cmake ninja-build g++ dpkg-dev file \
-            qt6-base-dev qt6-serialport-dev libgl1-mesa-dev ffmpeg
+            qt6-base-dev qt6-serialport-dev libgl1-mesa-dev ffmpeg unzip
       - uses: actions/checkout@v4
       - name: Version
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           echo "LT_VERSION=$(packaging/version.sh)" >> "$GITHUB_ENV"
-      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+      - uses: actions/download-artifact@v4
+        with: { name: tick, path: tick-dl }
+      - name: Tick to bundle (from the Tick job)
+        run: |
+          mkdir -p ../tick-bundle && cd ../tick-bundle
+          unzip -q ../tick-dl/Tick-*-Windows.zip && mv Tick/* . && rmdir Tick
+          tar xzf ../tick-dl/tick-*-linux-x86_64.tar.gz && ls -l
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DLIBRETAP_TICK_DIR=$PWD/../tick-bundle
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
       - name: Package
@@ -57,7 +65,8 @@ jobs:
           stat -c '%U:%G %a' /usr/bin/dumpcap
           getcap /usr/bin/dumpcap || true
           for f in /usr/bin/LibreTap /usr/bin/LibreTapCLI /usr/share/applications/io.github.ohlincha.libretap.desktop \
-                   /usr/share/icons/hicolor/256x256/apps/io.github.ohlincha.libretap.png; do
+                   /usr/share/icons/hicolor/256x256/apps/io.github.ohlincha.libretap.png \
+                   /usr/share/libretap/tick/Tick.exe /usr/share/libretap/tick/tick; do
             test -e "$f" || { echo "missing: $f"; exit 1; }
           done
           export LIBRETAP_HOME=$PWD/ws LIBRETAP_NO_SYSTEM_CAMERAS=1
@@ -71,6 +80,7 @@ jobs:
 
   windows:
     name: Windows installer
+    needs: tick
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +90,15 @@ jobs:
       - name: Version
         shell: bash
         run: echo "LT_VERSION=$(packaging/version.sh)" >> "$GITHUB_ENV"
-      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - uses: actions/download-artifact@v4
+        with: { name: tick, path: tick-dl }
+      - name: Tick to bundle (from the Tick job)
+        run: |
+          Expand-Archive (Get-Item ..\tick-dl\Tick-*-Windows.zip) -DestinationPath ..\tick-x
+          Move-Item ..\tick-x\Tick ..\tick-bundle
+          tar -xzf (Get-Item ..\tick-dl\tick-*-linux-x86_64.tar.gz) -C ..\tick-bundle
+          Get-ChildItem ..\tick-bundle
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DLIBRETAP_TICK_DIR=$((Resolve-Path ..\tick-bundle).Path -replace '\\','/')"
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
       - name: Failed tests, run directly (output and exit code)
@@ -115,6 +133,8 @@ jobs:
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
           Remove-Item env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
           $env:LIBRETAP_HOME = "$PWD\ws"
+          dist\LibreTap\LibreTapCLI.exe tick copy . | Tee-Object tick.txt
+          if (-not (Test-Path Tick\Tick.exe)) { throw "bundled Tick missing" }
           dist\LibreTap\LibreTapCLI.exe record --demo --camera demo --seconds 3 | Tee-Object rec.txt
           if (-not (Select-String -Quiet "stopped:" rec.txt)) { throw "headless recording failed" }
           # the camera path through the bundled ffmpeg, with its test picture as the camera
@@ -137,6 +157,7 @@ jobs:
 
   macos:
     name: macOS dmg (universal)
+    needs: tick
     runs-on: macos-15
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
@@ -151,9 +172,16 @@ jobs:
           mkdir -p icon.iconset
           for s in 16 32 64 128 256; do sips -z $s $s resources/icon.png --out icon.iconset/icon_${s}x${s}.png >/dev/null; done
           iconutil -c icns icon.iconset -o resources/icon.icns
+      - uses: actions/download-artifact@v4
+        with: { name: tick, path: tick-dl }
+      - name: Tick to bundle (from the Tick job)
+        run: |
+          mkdir -p ../tick-bundle && cd ../tick-bundle
+          unzip -q ../tick-dl/Tick-*-Windows.zip && mv Tick/* . && rmdir Tick
+          tar xzf ../tick-dl/tick-*-linux-x86_64.tar.gz && ls -l
       - run: >
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET -DLIBRETAP_TICK_DIR=$PWD/../tick-bundle
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure -E test_camera   # ffmpeg is bundled below, not installed
       - run: cmake --install build --prefix dist-mac

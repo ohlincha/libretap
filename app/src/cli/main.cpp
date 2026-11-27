@@ -15,6 +15,7 @@
 #include <csignal>
 #include <cstdio>
 
+#include "core/tickbundle.h"
 #include "core/analysis.h"
 #include "core/camerasource.h"
 #include "core/protocol.h"
@@ -58,6 +59,8 @@ const char* const kUsage = R"(LibreTapCLI — record what old vendor software sa
   LibreTapCLI import-usbpcap FILE [--device VID:PID|ADDRESS]… [--hubs] [--all] [--name NAME]
                                              a Windows USBPcap capture as a new recording, chosen devices only
                                              (without --device: lists the devices; keyboards may hold passwords)
+  LibreTapCLI tick [copy FOLDER]             the Tick that came with LibreTap; `copy` puts it in FOLDER/Tick
+                                             (e.g. a USB stick) to run on the old PC without installing
 
 Analysis (REC: folder, name or "latest"; a moment is --mark N or --at SECONDS from the start):
   LibreTapCLI exchanges REC                  questions and answers per link, repeats folded, with counts and timing
@@ -786,6 +789,34 @@ QJsonObject sessionSummary(const ProjectSession& ps) {
             {QStringLiteral("bad_lines"), s.badLines}};
 }
 
+int cmdTick(const QStringList& args) {
+    if (args.value(0) == QLatin1String("copy")) {
+        if (args.size() < 2) return fail(QStringLiteral("usage: LibreTapCLI tick copy FOLDER"), 2);
+        QStringList copied;
+        QString err;
+        if (!copyTick(args[1], &copied, &err)) return fail(err);
+        if (gJson) {
+            outJson({{QStringLiteral("ok"), true}, {QStringLiteral("folder"), QDir(args[1]).absoluteFilePath(QStringLiteral("Tick"))},
+                     {QStringLiteral("files"), QJsonArray::fromStringList(copied)}});
+        } else {
+            for (const QString& f : copied) out(QStringLiteral("copied %1").arg(f));
+            out(QStringLiteral("On the old PC: run Tick.exe (Windows) or ./tick (Linux) from that folder; read SAFETY.md first."));
+        }
+        return 0;
+    }
+    if (!args.isEmpty()) return fail(QStringLiteral("usage: LibreTapCLI tick [copy FOLDER]"), 2);
+    const QString d = bundledTickDir();
+    if (gJson) {
+        outJson({{QStringLiteral("ok"), !d.isEmpty()}, {QStringLiteral("folder"), d}, {QStringLiteral("files"), QJsonArray::fromStringList(bundledTickFiles())}});
+    } else if (d.isEmpty()) {
+        return fail(QStringLiteral("this LibreTap has no Tick inside; download Tick from https://github.com/ohlincha/libretap/releases"));
+    } else {
+        out(QStringLiteral("Tick is in %1: %2").arg(d, bundledTickFiles().join(QStringLiteral(", "))));
+        out(QStringLiteral("LibreTapCLI tick copy FOLDER  puts it on a USB stick for the old PC."));
+    }
+    return d.isEmpty() ? 1 : 0;
+}
+
 int cmdSessions() {
     const QString ws = workspaceDir();
     QJsonArray arr;
@@ -1002,6 +1033,7 @@ int main(int argc, char** argv) {
     }
     if (cmd == QLatin1String("guess")) return cmdGuess(raw);
     if (cmd == QLatin1String("sessions")) return cmdSessions();
+    if (cmd == QLatin1String("tick")) return cmdTick(raw);
     if (cmd == QLatin1String("show")) return cmdShow(raw);
     if (cmd == QLatin1String("match")) return cmdMatch(raw);
     if (cmd == QLatin1String("import")) return cmdImport(raw);
