@@ -148,7 +148,11 @@ linux-tools-test:
 
 # ---------------- DemoMeter / DemoInstrument: a pretend vendor program and instrument for trying Tick ----------------
 DEMOFLAGS := $(filter-out -DWINVER=0x0400 -D_WIN32_WINNT=0x0400,$(CFLAGS)) -DWINVER=0x0400 -D_WIN32_WINNT=0x0400
-demo: $(B)/demo/DemoMeter.exe $(B)/demo/DemoInstrument.exe
+demo: $(B)/demo/DemoMeter.exe $(B)/demo/DemoInstrument.exe $(B)/demo/demo-instrument
+$(B)/demo/demo-instrument: demo/instrument_linux.c
+	mkdir -p $(B)/demo
+	$(LCC) -O2 -Wall -Wextra -static -o $@ $< -lm
+	strip $@
 $(B)/demo/DemoMeter.exe: demo/meter.c demo/rt_demo.c demo/demo_common.h
 	mkdir -p $(B)/demo
 	$(CC) $(DEMOFLAGS) -nostdlib -mwindows -Wl,-e,_MeterMain@0 $(OSVER) -Wl,--disable-dynamicbase -s -o $@ demo/meter.c demo/rt_demo.c -lkernel32 -luser32 -lgdi32 -lws2_32

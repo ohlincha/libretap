@@ -4,9 +4,9 @@
  * No C runtime; Windows 95 (with Winsock 2) / 98 / 2000 / XP and later. */
 #include "demo_common.h"
 
-enum { ID_CONN = 100, ID_CONNECT, ID_INT, ID_GAIN, ID_READING, ID_POLLS, ID_STATUS, ID_TIMER = 1 };
+enum { ID_CONN = 100, ID_ADDR, ID_CONNECT, ID_INT, ID_GAIN, ID_READING, ID_POLLS, ID_STATUS, ID_TIMER = 1 };
 
-static HWND wnd, conn_box, int_box, gain_box, reading_lbl, polls_lbl, status_lbl, connect_btn;
+static HWND wnd, addr_edit, conn_box, int_box, gain_box, reading_lbl, polls_lbl, status_lbl, connect_btn;
 static SOCKET sock = INVALID_SOCKET;
 static HANDLE com = INVALID_HANDLE_VALUE;
 static int polls;
@@ -79,10 +79,15 @@ static void do_connect(void)
         memset(&a, 0, sizeof a);
         a.sin_family = AF_INET;
         a.sin_port = htons(DEMO_PORT);
-        a.sin_addr.s_addr = htonl(0x7f000001);   /* 127.0.0.1 */
+        {
+            char host[64];
+            GetWindowTextA(addr_edit, host, sizeof host);
+            a.sin_addr.s_addr = inet_addr(host[0] ? host : "127.0.0.1");
+            if (a.sin_addr.s_addr == INADDR_NONE) { disconnect(); status("Instrument address: four numbers, e.g. 10.0.2.2"); return; }
+        }
         if (sock == INVALID_SOCKET || connect(sock, (struct sockaddr *)&a, sizeof a) != 0) {
             disconnect();
-            status("No instrument on the network. Start DemoInstrument.exe first.");
+            status("No instrument at that address. Is DemoInstrument / demo-instrument running?");
             return;
         }
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tmo, sizeof tmo);
@@ -178,33 +183,46 @@ void __stdcall MeterMain(void)
     wc.lpszClassName = "DemoMeter";
     RegisterClassA(&wc);
     wnd = CreateWindowExA(0, "DemoMeter", "DEMO-METER Control 2.1", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                          CW_USEDEFAULT, CW_USEDEFAULT, 420, 270, 0, 0, hi, 0);
+                          CW_USEDEFAULT, CW_USEDEFAULT, 420, 300, 0, 0, hi, 0);
     add("STATIC", "Connection", 0, 16, 18, 110, 20, 0);
     conn_box = add("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 130, 14, 170, 200, ID_CONN);
     SendMessageA(conn_box, CB_ADDSTRING, 0, (LPARAM)"Network (this computer)");
     for (i = 1; i <= 4; i++) { wsprintfA(t, "COM%d, 9600 baud", i); SendMessageA(conn_box, CB_ADDSTRING, 0, (LPARAM)t); }
     SendMessageA(conn_box, CB_SETCURSEL, 0, 0);
     connect_btn = add("BUTTON", "Connect", BS_PUSHBUTTON | WS_TABSTOP, 310, 13, 85, 25, ID_CONNECT);
-    add("STATIC", "Integration time", 0, 16, 58, 110, 20, 0);
-    int_box = add("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 130, 54, 120, 200, ID_INT);
+    add("STATIC", "Instrument address", 0, 16, 48, 110, 20, 0);
+    addr_edit = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", "127.0.0.1", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                                130, 45, 170, 22, wnd, (HMENU)(INT_PTR)ID_ADDR, hi, 0);
+    SendMessageA(addr_edit, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), 0);
+    add("STATIC", "(network only)", 0, 310, 48, 90, 20, 0);
+    add("STATIC", "Integration time", 0, 16, 88, 110, 20, 0);
+    int_box = add("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 130, 84, 120, 200, ID_INT);
     for (i = 0; i < 4; i++) { wsprintfA(t, "%d ms", int_values[i]); SendMessageA(int_box, CB_ADDSTRING, 0, (LPARAM)t); }
     SendMessageA(int_box, CB_SETCURSEL, 2, 0);
-    add("STATIC", "Gain", 0, 16, 92, 110, 20, 0);
-    gain_box = add("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 130, 88, 120, 200, ID_GAIN);
+    add("STATIC", "Gain", 0, 16, 122, 110, 20, 0);
+    gain_box = add("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 130, 118, 120, 200, ID_GAIN);
     for (i = 0; i < 3; i++) { wsprintfA(t, "x%d", gain_values[i]); SendMessageA(gain_box, CB_ADDSTRING, 0, (LPARAM)t); }
     SendMessageA(gain_box, CB_SETCURSEL, 0, 0);
-    add("STATIC", "Reading", 0, 16, 126, 110, 20, 0);
-    reading_lbl = add("STATIC", "-", SS_SUNKEN, 130, 124, 120, 22, ID_READING);
-    add("STATIC", "Polls", 0, 16, 158, 110, 20, 0);
-    polls_lbl = add("STATIC", "0", SS_SUNKEN, 130, 156, 120, 22, ID_POLLS);
-    status_lbl = add("STATIC", "Start DemoInstrument.exe, then press Connect.", 0, 16, 196, 380, 20, ID_STATUS);
+    add("STATIC", "Reading", 0, 16, 156, 110, 20, 0);
+    reading_lbl = add("STATIC", "-", SS_SUNKEN, 130, 154, 120, 22, ID_READING);
+    add("STATIC", "Polls", 0, 16, 188, 110, 20, 0);
+    polls_lbl = add("STATIC", "0", SS_SUNKEN, 130, 186, 120, 22, ID_POLLS);
+    status_lbl = add("STATIC", "Start the instrument program, then press Connect.", 0, 16, 226, 380, 20, ID_STATUS);
     ShowWindow(wnd, SW_SHOW);
     {   /* for scripts: /connect connects at once, /gain4 then changes the gain after 3 s */
         const char *cl = GetCommandLineA();
         for (i = 0; cl[i]; i++) {
-            if (d_starts(cl + i, "/connect")) do_connect();
             if (d_starts(cl + i, "/gain4")) SetTimer(wnd, 2, 3000, 0);
+            if (d_starts(cl + i, "/com1")) SendMessageA(conn_box, CB_SETCURSEL, 1, 0);
+            if (d_starts(cl + i, "/addr=")) {
+                char a[64];
+                int k = 0;
+                for (const char *q = cl + i + 6; *q && *q != ' ' && k < 63; q++) a[k++] = *q;
+                a[k] = 0;
+                SetWindowTextA(addr_edit, a);
+            }
         }
+        for (i = 0; cl[i]; i++) if (d_starts(cl + i, "/connect")) do_connect();
     }
     while (GetMessageA(&msg, 0, 0, 0) > 0) {
         if (IsDialogMessageA(wnd, &msg)) continue;

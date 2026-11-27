@@ -248,8 +248,10 @@ jobs:
           mkdir -p dist/Tick
           cp build/Tick.exe build/TickEyes.exe README.md SAFETY.md dist/Tick/
           (cd dist && zip -qr "Tick-${v:-dev}-Windows.zip" Tick)
-          mkdir -p dist/TickTestKit && cp build/demo/DemoMeter.exe build/demo/DemoInstrument.exe demo/README.txt dist/TickTestKit/
-          (cd dist && zip -qr "TickTestKit-${v:-dev}-Windows.zip" TickTestKit)
+          mkdir -p dist/TickTestKit/windows dist/TickTestKit/linux
+          cp build/demo/DemoMeter.exe build/demo/DemoInstrument.exe dist/TickTestKit/windows/
+          cp build/demo/demo-instrument dist/TickTestKit/linux/ && cp demo/README.txt build/Tick.exe dist/TickTestKit/
+          (cd dist && zip -qr "TickTestKit-${v:-dev}.zip" TickTestKit)
           cp build/linux/tick dist/tick && (cd dist && tar czf "tick-${v:-dev}-linux-x86_64.tar.gz" tick)
           ls -l dist
       - uses: actions/upload-artifact@v4

@@ -2,37 +2,43 @@ TICK TEST KIT: DemoMeter and DemoInstrument
 ==========================================
 
 A pretend instrument and its "vendor program", for trying Tick on a test PC or
-virtual machine before using it next to a real instrument. Windows 98, 2000, XP
-and later. Nothing to install.
+virtual machine before using it next to a real instrument. Nothing to install.
 
-  DemoInstrument.exe   the instrument. Answers on the network (this computer,
-                       port 5025) and on COM2 if there is one.
-  DemoMeter.exe        the vendor program. Integration time, gain, a reading
-                       every 0.5 s.
+  windows\DemoMeter.exe       the vendor program (Windows 98, 2000, XP and
+                              later). Run it from Tick.
+  windows\DemoInstrument.exe  the instrument, on the same Windows PC.
+  linux/demo-instrument       the instrument on a Linux computer, e.g. the host
+                              of a Windows XP virtual machine.
 
-Try it
-------
-1. Copy this folder and Tick.exe onto the test PC.
-2. Start DemoInstrument.exe. Leave its window open. If Windows Firewall asks,
-   choose Unblock (or Keep blocking: the test uses this computer only).
-3. Start Tick.exe. Press "Start a program...", choose DemoMeter.exe.
-4. In DemoMeter, press Connect. Change the integration time and the gain;
-   press Mark in Tick before each change.
-5. Stop in Tick. The session folder (TickSessions\...) holds the screenshots
-   and every command and answer. Open it in LibreTap: File > Add Tick session.
+A. Everything on one Windows PC
+-------------------------------
+1. Start windows\DemoInstrument.exe. Leave its window open.
+2. Start Tick.exe > Start a program... > DemoMeter.exe.
+3. In DemoMeter: Connection "Network", address 127.0.0.1, Connect.
+4. Change integration time and gain; press Mark in Tick before each change.
+5. Stop in Tick. The session (TickSessions\...) goes into LibreTap:
+   File > Add Tick session.
 
-Expected in Tick: "DemoMeter.exe connected to 127.0.0.1:5025 (TCP)" and the
-byte counts rising.
+B. Instrument on the Linux host, Windows XP in a virtual machine
+----------------------------------------------------------------
+On the host, in a terminal:   ./demo-instrument
+It prints what it listens on; Ctrl-C stops it.
 
-Serial (optional)
------------------
-For Tick's serial listener, the test PC needs two COM ports wired to each
-other: COM1 for DemoMeter, COM2 for DemoInstrument. On a real PC: a null-modem
-cable between COM1 and COM2. In a virtual machine: connect the VM's COM1 and
-COM2 to each other (e.g. VirtualBox: both ports as "Host Pipe" with the same
-pipe path, the first with "Connect to existing pipe" off, the second on).
-Then choose "COM1, 9600 baud" in DemoMeter before Connect.
-The VM setup has not been tested.
+Network: in DemoMeter (in the VM), Connection "Network", address = the host
+as seen from the VM (VirtualBox with NAT networking: 10.0.2.2), Connect.
+
+Serial (tests Tick's COM-port listener, as with OPUS): give the VM a COM1
+connected to demo-instrument, then choose "COM1, 9600 baud" in DemoMeter.
+  VirtualBox: Settings > Serial Ports > Port 1: Enable, Port Mode "TCP",
+              "Connect to existing pipe/socket" ticked, Path/Address
+              127.0.0.1:5026.  (Or Port Mode "Host Pipe", ticked,
+              /tmp/demo-instrument-com.)
+  QEMU:       -serial tcp:127.0.0.1:5026
+The VM must be started after demo-instrument.
+
+Expected in Tick: "DemoMeter.exe connected to ...:5025 (TCP)" or
+"DemoMeter.exe opened COM1: 9600 baud, 8N1", and the byte counts rising.
+The VirtualBox and QEMU serial settings have not been tested.
 
 Commands (text lines ending in CR)
 ----------------------------------
