@@ -30,6 +30,11 @@ optional error LED (packets with errors: wrong speed setting or a poor splice).
 
 ## Flashing
 
+Step-by-step guide with drawings, for Windows, macOS and Linux:
+[docs/hardware/pico-firmware-flashing.pdf](../../docs/hardware/pico-firmware-flashing.pdf). Building the sniffer:
+[docs/hardware/usb-sniffer-build.pdf](../../docs/hardware/usb-sniffer-build.pdf).
+
+
 1. Hold BOOTSEL on the Pico while plugging it into the laptop. A drive called `RPI-RP2` appears.
 2. Copy `bin/UsbSnifferStream.uf2` onto it. The Pico restarts as "USB Sniffer Stream (RP2040)", a serial port
    (`/dev/ttyACM0`, `COM5`, …). It keeps usb-sniffer-lite's USB IDs (6666:6610), so its udev rule

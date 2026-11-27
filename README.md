@@ -49,6 +49,17 @@ instrument.
 network captures and a stand-in dumpcap, simulated cameras, and real Tick sessions recorded under Wine; Windows and
 macOS builds and the installers' permission steps are set up in CI but not yet run.
 
+## Hardware
+
+Printable build guides (PDF, A4) for scientists who have never soldered, with drawings for every step:
+
+- [Serial tap: build guide](docs/hardware/serial-tap-build.pdf): the passive DB-9 tap (two USB–RS-232 adapters).
+- [USB sniffer: build guide](docs/hardware/usb-sniffer-build.pdf): a Raspberry Pi Pico spliced into a USB extension.
+- [Pico firmware: flashing](docs/hardware/pico-firmware-flashing.pdf): USB Sniffer Stream on Windows, macOS and Linux.
+
+Sources: `docs/hardware/src/` (drawings and text in Python, written to HTML), built with
+`docs/hardware/build-pdfs.sh` (Chrome or Chromium). Untested on real instruments.
+
 ## What the installers change on your system
 
 Capturing network traffic needs permission, so the installers set it up (this changes system settings):
