@@ -61,6 +61,7 @@ Printable build guides (PDF, A4) for scientists who have never soldered, with dr
 - [Serial tap: build guide](docs/hardware/serial-tap-build.pdf): the passive DB-9 tap (two USB–RS-232 adapters).
 - [USB sniffer: build guide](docs/hardware/usb-sniffer-build.pdf): a Raspberry Pi Pico spliced into a USB extension.
 - [Pico firmware: flashing](docs/hardware/pico-firmware-flashing.pdf): USB Sniffer Stream on Windows, macOS and Linux.
+- [Ethernet capture: switch setup](docs/hardware/switch-setup.pdf): port mirroring on a TP-Link TL-SG105E.
 
 Sources: `docs/hardware/src/` (drawings and text in Python, written to HTML), built with
 `docs/hardware/build-pdfs.sh` (Chrome or Chromium). Untested on real instruments.

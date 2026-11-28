@@ -17,6 +17,12 @@ try:
 except ImportError:
     pass
 
+try:
+    import switch_setup  # noqa: E402
+    GUIDES["switch-setup.html"] = switch_setup.build
+except ImportError:
+    pass
+
 out_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for name, fn in GUIDES.items():
     with open(os.path.join(out_dir, name), "w", encoding="utf-8") as f:
