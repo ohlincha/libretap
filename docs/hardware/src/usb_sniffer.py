@@ -228,7 +228,9 @@ instrument are connected exactly as before.</figcaption></figure>
 <ol class="steps">
 <li>Choose a point about 30 cm from the A socket end. Score the outer jacket around the cable twice, 3 cm apart, and
 once lengthwise between the two. Do not press hard: the wires lie just underneath.</li>
-<li>Peel the jacket off. Fold the foil and the braid (if any) back; do not cut them off.</li>
+<li>Peel the jacket off. Fold the foil and the braid (if any) back, or cut them off over the opening only (harmless at
+these speeds). A bare wire in the foil is the drain, part of the shield, not GND. The shield is never connected to the
+Pico.</li>
 <li>Spread the four wires. On <b>green</b>, <b>white</b> and <b>black</b>, cut two shallow rings 3–4 mm apart and peel
 the insulation off between them. Stagger the three windows so the joints are not side by side.</li>
 <li>Leave <b>red</b> closed.</li>
@@ -236,6 +238,13 @@ the insulation off between them. Stagger the three windows so the joints are not
 </ol>
 <div class="check"><b>Check.</b> Each window shows bright copper; no strands are cut. Continuity from the A plug through to
 the A socket is still there for all four contacts (contact n of the plug to contact n of the socket).</div>
+<div class="warn"><b>If a wire breaks.</b> These cores are thin and snap easily. <b>Black (GND)</b>: strip both ends 5 mm and
+twist them together with the Pico's black wire into one joint; solder and tape it. That joint replaces the black window.
+<b>Several wires damaged, or windows too fiddly</b>: cut the cable through. Join each colour straight through, adding the
+Pico's wire into the green, white and black joints (three wires per joint; red is only rejoined). Slide heat-shrink on
+before soldering, stagger the joints, keep green and white untwisted for at most 2–3 cm, then twist them loosely again.
+If the shield was cut, join the braid of both sides with a short wire (optional). Then repeat the check above, and check
+that no two wires beep with each other.</div>
 </section>""")
     b.append(f"""<section>
 <h2>3. Solder the wires to the cable</h2>
